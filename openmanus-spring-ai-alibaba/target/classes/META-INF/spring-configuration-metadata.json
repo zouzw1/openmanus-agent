@@ -1,0 +1,112 @@
+{
+  "groups": [
+    {
+      "name": "openmanus.agent",
+      "type": "com.openmanus.saa.config.OpenManusProperties",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.browser",
+      "type": "com.openmanus.saa.config.BrowserProperties",
+      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+    },
+    {
+      "name": "openmanus.mcp",
+      "type": "com.openmanus.saa.config.McpProperties",
+      "sourceType": "com.openmanus.saa.config.McpProperties"
+    },
+    {
+      "name": "openmanus.sandbox",
+      "type": "com.openmanus.saa.config.SandboxProperties",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    }
+  ],
+  "properties": [
+    {
+      "name": "openmanus.agent.max-steps",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.agent.shell-enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.agent.shell-timeout-seconds",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.agent.system-prompt",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.agent.workflow-use-data-analysis-agent",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.agent.workspace",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+    },
+    {
+      "name": "openmanus.browser.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+    },
+    {
+      "name": "openmanus.browser.headless",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+    },
+    {
+      "name": "openmanus.browser.timeout-seconds",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+    },
+    {
+      "name": "openmanus.mcp.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.McpProperties"
+    },
+    {
+      "name": "openmanus.mcp.servers",
+      "type": "java.util.Map<java.lang.String,com.openmanus.saa.config.McpProperties$ServerConfig>",
+      "sourceType": "com.openmanus.saa.config.McpProperties"
+    },
+    {
+      "name": "openmanus.sandbox.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.sandbox.image",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.sandbox.memory-limit",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.sandbox.network-enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.sandbox.timeout-seconds",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.sandbox.working-directory",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    }
+  ],
+  "hints": []
+}

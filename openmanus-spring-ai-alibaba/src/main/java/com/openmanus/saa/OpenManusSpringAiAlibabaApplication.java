@@ -1,0 +1,23 @@
+package com.openmanus.saa;
+
+import com.openmanus.saa.config.OpenManusProperties;
+import com.openmanus.saa.config.McpProperties;
+import com.openmanus.saa.config.BrowserProperties;
+import com.openmanus.saa.config.SandboxProperties;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+
+@SpringBootApplication
+@EnableConfigurationProperties({
+        OpenManusProperties.class,
+        McpProperties.class,
+        BrowserProperties.class,
+        SandboxProperties.class
+})
+public class OpenManusSpringAiAlibabaApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(OpenManusSpringAiAlibabaApplication.class, args);
+    }
+}
