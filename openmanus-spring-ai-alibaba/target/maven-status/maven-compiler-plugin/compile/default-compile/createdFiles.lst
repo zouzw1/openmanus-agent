@@ -1,0 +1,8 @@
+com\openmanus\saa\service\RequestRoutingService.class
+com\openmanus\saa\controller\SkillsController.class
+com\openmanus\saa\service\ManusAgentService$1.class
+com\openmanus\saa\config\SkillsConfig.class
+com\openmanus\saa\model\SkillInfoResponse.class
+com\openmanus\saa\service\RequestRoutingService$RouteMode.class
+com\openmanus\saa\service\SkillsService.class
+com\openmanus\saa\config\SkillsProperties.class
