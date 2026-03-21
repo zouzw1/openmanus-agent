@@ -4,6 +4,10 @@ import java.util.List;
 
 public record PlanResponse(
         String objective,
-        List<String> steps
+        List<String> steps,
+        String summary
 ) {
+    public PlanResponse(String objective, List<String> steps) {
+        this(objective, steps, null);
+    }
 }

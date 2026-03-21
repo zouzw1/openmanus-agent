@@ -1,6 +1,7 @@
 package com.openmanus.saa.service;
 
 import com.openmanus.saa.config.OpenManusProperties;
+import com.openmanus.saa.model.AgentResponse;
 import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
 import com.openmanus.saa.model.StepStatus;
@@ -77,6 +78,10 @@ public class WorkflowService {
         return executeNewPlan(resolvedSessionId, objective);
     }
 
+    public AgentResponse executeAsAgentResponse(String sessionId, String objective) {
+        return toAgentResponse(execute(sessionId, objective));
+    }
+
     public Optional<HumanFeedbackRequest> getPendingFeedback(String sessionId) {
         return sessionMemoryService.getPendingFeedback(sessionId);
     }
@@ -98,6 +103,10 @@ public class WorkflowService {
                     pendingFeedback.getStepIndex()
             );
         };
+    }
+
+    public AgentResponse submitHumanFeedbackAsAgentResponse(String sessionId, HumanFeedbackResponse feedback) {
+        return toAgentResponse(submitHumanFeedback(sessionId, feedback));
     }
 
     private WorkflowExecutionResponse executeNewPlan(String sessionId, String objective) {
@@ -575,11 +584,11 @@ public class WorkflowService {
         }
         userMessage.append("\n");
         userMessage.append(chinese
-                ? "\u67e5\u8be2\u5f85\u5904\u7406\u53cd\u9988: GET /api/agent/workflow/pending-feedback/{sessionId}\n"
-                : "Fetch details: GET /api/agent/workflow/pending-feedback/{sessionId}\n");
+                ? "\u67e5\u8be2\u5f85\u5904\u7406\u53cd\u9988: GET /api/agent/pending-feedback/{sessionId}\n"
+                : "Fetch details: GET /api/agent/pending-feedback/{sessionId}\n");
         userMessage.append(chinese
-                ? "\u63d0\u4ea4\u53cd\u9988\u5e76\u7ee7\u7eed: POST /api/agent/workflow/feedback\n"
-                : "Resume flow: POST /api/agent/workflow/feedback\n");
+                ? "\u63d0\u4ea4\u53cd\u9988\u5e76\u7ee7\u7eed: POST /api/agent/feedback\n"
+                : "Resume flow: POST /api/agent/feedback\n");
         userMessage.append(chinese
                 ? "\u53ef\u76f4\u63a5\u63d0\u4ea4\u81ea\u7136\u8bed\u8a00\u53cd\u9988\uff0c\u4f8b\u5982\uff1a\u201c\u7528\u4fee\u6b63\u540e\u7684\u53c2\u6570\u518d\u8bd5\u201d\u3001\u201c\u8df3\u8fc7\u8fd9\u4e00\u6b65\u201d\u3001\u201c\u7ed3\u675f\u6d41\u7a0b\u201d\u3002\n"
                         + "\u5982\u9700\u663e\u5f0f\u63a7\u5236\uff0c\u4ecd\u652f\u6301 action: PROVIDE_INFO, MODIFY_AND_RETRY, RETRY, SKIP_STEP, ABORT_PLAN"
@@ -599,6 +608,33 @@ public class WorkflowService {
                 toExecutionLog(executedSteps),
                 summary,
                 pendingFeedback
+        );
+    }
+
+    private AgentResponse toAgentResponse(WorkflowExecutionResponse response) {
+        List<String> planSteps = response.steps() == null
+                ? List.of()
+                : response.steps().stream().map(WorkflowStep::getDescription).toList();
+        List<WorkflowStep> workflowSteps = response.steps() == null ? List.of() : response.steps();
+        List<String> executionLog = response.executionLog() == null ? List.of() : response.executionLog();
+        String content = formatWorkflowExecutionMarkdown(
+                response.objective(),
+                workflowSteps,
+                executionLog,
+                response.summary(),
+                response.pendingFeedback()
+        );
+        String summary = response.summary() == null ? null : response.summary().userMessage();
+        return new AgentResponse(
+                "plan-execute",
+                response.objective(),
+                summary,
+                content,
+                planSteps,
+                workflowSteps,
+                executionLog,
+                response.summary(),
+                response.pendingFeedback()
         );
     }
 
@@ -632,6 +668,83 @@ public class WorkflowService {
                 currentStep,
                 userMessage
         );
+    }
+
+    private String formatWorkflowExecutionMarkdown(
+            String objective,
+            List<WorkflowStep> steps,
+            List<String> executionLog,
+            WorkflowSummary summary,
+            HumanFeedbackRequest pendingFeedback
+    ) {
+        boolean chinese = ResponseLanguageHelper.detect(objective) == ResponseLanguageHelper.Language.ZH_CN;
+        StringBuilder markdown = new StringBuilder();
+        markdown.append(chinese ? "## 执行概览\n\n" : "## Execution Overview\n\n");
+        if (summary != null) {
+            markdown.append(chinese ? "- 目标：" : "- Objective: ").append(objective).append("\n");
+            markdown.append(chinese ? "- 状态：" : "- Status: ").append(summary.statusLabel()).append("\n");
+            markdown.append(chinese ? "- 总步骤数：" : "- Total steps: ").append(summary.totalSteps()).append("\n");
+            markdown.append(chinese ? "- 已完成：" : "- Completed: ").append(summary.completedSteps()).append("\n");
+            markdown.append(chinese ? "- 已跳过：" : "- Skipped: ").append(summary.skippedSteps()).append("\n");
+            markdown.append(chinese ? "- 失败/阻塞：" : "- Failed/blocked: ").append(summary.failedSteps()).append("\n");
+            if (summary.currentStep() != null && !summary.currentStep().isBlank()) {
+                markdown.append(chinese ? "- 当前步骤：" : "- Current step: ").append(summary.currentStep()).append("\n");
+            }
+        } else {
+            markdown.append(chinese ? "- 目标：" : "- Objective: ").append(objective).append("\n");
+        }
+
+        markdown.append("\n").append(chinese ? "## 步骤状态\n\n" : "## Step Status\n\n");
+        if (steps == null || steps.isEmpty()) {
+            markdown.append(chinese ? "暂无步骤。\n" : "No steps.\n");
+        } else {
+            for (int i = 0; i < steps.size(); i++) {
+                WorkflowStep step = steps.get(i);
+                markdown.append("### ")
+                        .append(chinese ? "步骤 " : "Step ")
+                        .append(i + 1)
+                        .append("\n\n");
+                markdown.append(chinese ? "- Agent：" : "- Agent: ").append(step.getAgent()).append("\n");
+                markdown.append(chinese ? "- 计划：" : "- Plan: ").append(step.getDescription()).append("\n");
+                markdown.append(chinese ? "- 状态：" : "- Status: ").append(step.getStatus()).append("\n");
+                if (step.getResult() != null && !step.getResult().isBlank()) {
+                    markdown.append(chinese ? "- 结果：\n\n" : "- Result:\n\n")
+                            .append(indentAsBlockQuote(step.getResult()))
+                            .append("\n");
+                }
+                if (step.getErrorMessage() != null && !step.getErrorMessage().isBlank()) {
+                    markdown.append(chinese ? "- 错误：\n\n" : "- Error:\n\n")
+                            .append(indentAsBlockQuote(step.getErrorMessage()))
+                            .append("\n");
+                }
+                markdown.append("\n");
+            }
+        }
+
+        markdown.append(chinese ? "## 执行日志\n\n" : "## Execution Log\n\n");
+        if (executionLog == null || executionLog.isEmpty()) {
+            markdown.append(chinese ? "暂无执行日志。\n" : "No execution log.\n");
+        } else {
+            for (String logLine : executionLog) {
+                markdown.append("- ").append(logLine).append("\n");
+            }
+        }
+
+        if (pendingFeedback != null) {
+            markdown.append("\n").append(chinese ? "## 需要用户反馈\n\n" : "## Human Feedback Needed\n\n");
+            markdown.append(indentAsBlockQuote(pendingFeedback.getUserMessage())).append("\n");
+        }
+
+        return markdown.toString().trim();
+    }
+
+    private String indentAsBlockQuote(String text) {
+        if (text == null || text.isBlank()) {
+            return "> ";
+        }
+        return text.lines()
+                .map(line -> "> " + line)
+                .collect(Collectors.joining("\n"));
     }
 
     private String statusLabel(String objective, WorkflowExecutionStatus status) {

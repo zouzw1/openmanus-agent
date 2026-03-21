@@ -47,6 +47,17 @@ public class PlanningService {
                         4. Consider dependencies and verification methods
                         5. Know when to conclude - don't continue thinking once objectives are met
 
+                        IMPORTANT PLANNING RULES:
+                        - Each step must be an action, not internal reasoning.
+                        - Do not include explanations, analysis, or long narratives inside steps.
+                        - Do not invent pseudo-parameter names, slot names, JSON keys, or schema fields.
+                        - If some user information is missing, describe it in plain language, for example:
+                          "ask the user for departure city"
+                          not:
+                          "collect parameter departureCity"
+                        - Mention tool names only when they are clear and necessary.
+                        - If the exact tool schema is unknown, keep the step in natural language.
+
                         Return plain text only, one step per line, without numbering prefixes.
                         Each step should be concise and actionable.
 
@@ -66,7 +77,7 @@ public class PlanningService {
                 .filter(line -> !line.isBlank())
                 .map(this::stripPrefix)
                 .collect(Collectors.toList());
-        return new PlanResponse(objective, steps);
+        return new PlanResponse(objective, steps, buildHumanFriendlyPlanSummary(objective, steps));
     }
 
     public List<WorkflowStep> createWorkflowPlan(String objective, String availableAgents) {
@@ -99,6 +110,8 @@ public class PlanningService {
                         4. Never restate the task as a step.
                         5. If a required parameter cannot be obtained, create at most one explicit clarification step.
                         6. Do not repeat the same tool call for the same target unless the task explicitly requires it.
+                        7. Do not invent pseudo-parameter names, slot names, aliases, or fake schema fields inside step descriptions.
+                        8. If information is missing, describe the missing information in plain language.
 
                         Return JSON only as an array.
                         Each item must follow this schema:
@@ -386,5 +399,60 @@ public class PlanningService {
             return new WorkflowStep(agent.isBlank() ? "manus" : agent, description);
         }
         return new WorkflowStep("manus", line);
+    }
+
+    private String buildHumanFriendlyPlanSummary(String objective, List<String> steps) {
+        boolean chinese = ResponseLanguageHelper.detect(objective) == ResponseLanguageHelper.Language.ZH_CN;
+        StringBuilder summary = new StringBuilder();
+
+        if (chinese) {
+            summary.append("## 计划摘要\n\n");
+            summary.append("- 目标：").append(objective).append("\n");
+            summary.append("- 计划步骤数：").append(steps.size()).append("\n\n");
+            summary.append("## 审阅表\n\n");
+        } else {
+            summary.append("## Plan Summary\n\n");
+            summary.append("- Objective: ").append(objective).append("\n");
+            summary.append("- Number of steps: ").append(steps.size()).append("\n\n");
+            summary.append("## Review Table\n\n");
+        }
+
+        if (steps.isEmpty()) {
+            summary.append(chinese ? "暂无计划步骤。\n" : "No plan steps were generated.\n");
+            return summary.toString().trim();
+        }
+
+        if (chinese) {
+            summary.append("| 步骤 | 计划内容 | 用户审阅重点 |\n");
+            summary.append("| --- | --- | --- |\n");
+        } else {
+            summary.append("| Step | Planned Action | What To Review |\n");
+            summary.append("| --- | --- | --- |\n");
+        }
+
+        for (int i = 0; i < steps.size(); i++) {
+            String reviewHint = chinese
+                    ? "确认是否需要保留、修改、补充信息或调整顺序"
+                    : "Check whether to keep, edit, add missing info, or reorder";
+            summary.append("| ")
+                    .append(i + 1)
+                    .append(" | ")
+                    .append(escapeMarkdownTableCell(steps.get(i)))
+                    .append(" | ")
+                    .append(reviewHint)
+                    .append(" |\n");
+        }
+
+        return summary.toString().trim();
+    }
+
+    private String escapeMarkdownTableCell(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("|", "\\|")
+                .replace("\r", " ")
+                .replace("\n", "<br>");
     }
 }

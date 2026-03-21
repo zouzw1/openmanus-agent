@@ -5,7 +5,6 @@ import com.openmanus.saa.model.AgentResponse;
 import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
 import com.openmanus.saa.model.PlanResponse;
-import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowFeedbackRequest;
 import com.openmanus.saa.service.HumanFeedbackResolutionService;
 import com.openmanus.saa.service.ManusAgentService;
@@ -45,7 +44,7 @@ public class AgentController {
 
     @PostMapping("/chat")
     public AgentResponse chat(@Valid @RequestBody AgentRequest request) {
-        return manusAgentService.chat(request.sessionId(), request.prompt());
+        return manusAgentService.routeChat(request.sessionId(), request.prompt());
     }
 
     @PostMapping("/plan")
@@ -55,30 +54,25 @@ public class AgentController {
 
     @PostMapping("/execute")
     public AgentResponse execute(@Valid @RequestBody AgentRequest request) {
-        return manusAgentService.executeWithPlan(request.sessionId(), request.prompt());
+        return workflowService.executeAsAgentResponse(request.sessionId(), request.prompt());
     }
 
-    @PostMapping("/workflow/execute")
-    public WorkflowExecutionResponse executeWorkflow(@Valid @RequestBody AgentRequest request) {
-        return workflowService.execute(request.sessionId(), request.prompt());
-    }
-
-    @GetMapping("/workflow/pending-feedback/{sessionId}")
+    @GetMapping({"/pending-feedback/{sessionId}", "/workflow/pending-feedback/{sessionId}"})
     public ResponseEntity<HumanFeedbackRequest> getPendingWorkflowFeedback(@PathVariable String sessionId) {
         return workflowService.getPendingFeedback(sessionId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    @PostMapping("/workflow/feedback")
-    public WorkflowExecutionResponse submitWorkflowFeedback(@Valid @RequestBody WorkflowFeedbackRequest request) {
+    @PostMapping({"/feedback", "/workflow/feedback"})
+    public AgentResponse submitWorkflowFeedback(@Valid @RequestBody WorkflowFeedbackRequest request) {
         try {
             HumanFeedbackRequest pendingFeedback = workflowService.getPendingFeedback(request.sessionId())
                     .orElseThrow(() -> new IllegalStateException(
                             "No pending workflow feedback found for session: " + request.sessionId()
                     ));
             HumanFeedbackResponse feedback = humanFeedbackResolutionService.resolve(request, pendingFeedback);
-            return workflowService.submitHumanFeedback(request.sessionId(), feedback);
+            return workflowService.submitHumanFeedbackAsAgentResponse(request.sessionId(), feedback);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

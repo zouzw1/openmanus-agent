@@ -19,6 +19,11 @@
       "name": "openmanus.sandbox",
       "type": "com.openmanus.saa.config.SandboxProperties",
       "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.skills",
+      "type": "com.openmanus.saa.config.SkillsProperties",
+      "sourceType": "com.openmanus.saa.config.SkillsProperties"
     }
   ],
   "properties": [
@@ -106,6 +111,26 @@
       "name": "openmanus.sandbox.working-directory",
       "type": "java.lang.String",
       "sourceType": "com.openmanus.saa.config.SandboxProperties"
+    },
+    {
+      "name": "openmanus.skills.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+    },
+    {
+      "name": "openmanus.skills.lazy-load",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+    },
+    {
+      "name": "openmanus.skills.project-skills-directory",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+    },
+    {
+      "name": "openmanus.skills.user-skills-directory",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SkillsProperties"
     }
   ],
   "hints": []

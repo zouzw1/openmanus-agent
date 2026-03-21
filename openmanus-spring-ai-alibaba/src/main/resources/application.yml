@@ -47,6 +47,11 @@ openmanus:
         type: sse
         url: http://127.0.0.1:18080/mcp
         sse-endpoint: /sse
+  skills:
+    enabled: true
+    lazy-load: true
+    project-skills-directory: ./skills/project
+    user-skills-directory: ./skills/user
 
 logging:
   level:

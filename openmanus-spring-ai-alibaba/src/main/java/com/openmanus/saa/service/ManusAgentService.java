@@ -6,16 +6,14 @@ import com.openmanus.saa.model.PlanResponse;
 import com.openmanus.saa.model.session.SessionState;
 import com.openmanus.saa.service.mcp.McpPromptContextService;
 import com.openmanus.saa.service.session.SessionMemoryService;
-import com.openmanus.saa.tool.PlanningTools;
-import com.openmanus.saa.tool.ShellTools;
-import com.openmanus.saa.tool.McpToolBridge;
 import com.openmanus.saa.tool.BrowserAutomationTools;
+import com.openmanus.saa.tool.McpToolBridge;
+import com.openmanus.saa.tool.PlanningTools;
 import com.openmanus.saa.tool.SandboxTools;
+import com.openmanus.saa.tool.ShellTools;
 import com.openmanus.saa.tool.WorkspaceTools;
 import com.openmanus.saa.util.ResponseLanguageHelper;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -31,8 +29,10 @@ public class ManusAgentService {
     private final BrowserAutomationTools browserAutomationTools;
     private final SandboxTools sandboxTools;
     private final PlanningService planningService;
+    private final RequestRoutingService requestRoutingService;
     private final McpPromptContextService mcpPromptContextService;
     private final SessionMemoryService sessionMemoryService;
+    private final WorkflowService workflowService;
 
     public ManusAgentService(
             ChatClient chatClient,
@@ -44,8 +44,10 @@ public class ManusAgentService {
             BrowserAutomationTools browserAutomationTools,
             SandboxTools sandboxTools,
             PlanningService planningService,
+            RequestRoutingService requestRoutingService,
             McpPromptContextService mcpPromptContextService,
-            SessionMemoryService sessionMemoryService
+            SessionMemoryService sessionMemoryService,
+            WorkflowService workflowService
     ) {
         this.chatClient = chatClient;
         this.properties = properties;
@@ -56,16 +58,47 @@ public class ManusAgentService {
         this.browserAutomationTools = browserAutomationTools;
         this.sandboxTools = sandboxTools;
         this.planningService = planningService;
+        this.requestRoutingService = requestRoutingService;
         this.mcpPromptContextService = mcpPromptContextService;
         this.sessionMemoryService = sessionMemoryService;
+        this.workflowService = workflowService;
+    }
+
+    public AgentResponse routeChat(String sessionId, String prompt) {
+        RequestRoutingService.RouteMode routeMode = requestRoutingService.decideChatOrPlan(prompt);
+        return switch (routeMode) {
+            case DIRECT_CHAT -> chat(sessionId, prompt);
+            case PLAN_ONLY -> planOnly(sessionId, prompt);
+            case PLAN_EXECUTE -> executeWithPlan(sessionId, prompt);
+        };
+    }
+
+    public AgentResponse planOnly(String sessionId, String objective) {
+        SessionState session = sessionMemoryService.getOrCreate(sessionId);
+        session.addMessage("user", objective);
+
+        PlanResponse plan = planningService.createPlan(objective);
+        String planOutput = plan.summary() != null && !plan.summary().isBlank()
+                ? plan.summary()
+                : String.join("\n", plan.steps());
+
+        session.addMessage("assistant", planOutput);
+        return new AgentResponse(
+                "plan",
+                objective,
+                planOutput,
+                planOutput,
+                plan.steps()
+        );
     }
 
     public AgentResponse chat(String sessionId, String prompt) {
         SessionState session = sessionMemoryService.getOrCreate(sessionId);
         session.addMessage("user", prompt);
+
         String history = sessionMemoryService.summarizeHistory(session, 12);
         String languageDirective = ResponseLanguageHelper.responseDirective(prompt);
-        String content = chatClient.prompt()
+        String reply = chatClient.prompt()
                 .system("""
                         %s
 
@@ -83,49 +116,34 @@ public class ManusAgentService {
                 .tools(workspaceTools, shellTools, planningTools, mcpToolBridge, browserAutomationTools, sandboxTools)
                 .call()
                 .content();
-        session.addMessage("assistant", content);
-        return new AgentResponse("chat", content, List.of());
+
+        session.addMessage("assistant", reply);
+        return new AgentResponse(
+                "chat",
+                prompt,
+                reply,
+                formatChatMarkdown(prompt, reply),
+                List.of()
+        );
     }
 
     public AgentResponse executeWithPlan(String sessionId, String objective) {
-        SessionState session = sessionMemoryService.getOrCreate(sessionId);
-        session.addMessage("user", objective);
-        PlanResponse plan = planningService.createPlan(objective);
-        String planId = "plan-" + UUID.randomUUID();
-        planningTools.createPlan(planId, plan.steps());
-        String languageDirective = ResponseLanguageHelper.responseDirective(objective);
-        String stepPrefix = "Step ";
+        return workflowService.executeAsAgentResponse(sessionId, objective);
+    }
 
-        List<String> results = new ArrayList<>();
-        int stepsToRun = Math.min(plan.steps().size(), properties.getMaxSteps());
-        for (int i = 0; i < stepsToRun; i++) {
-            String step = plan.steps().get(i);
-            String stepResult = chatClient.prompt()
-                    .system("""
-                            %s
+    private String formatChatMarkdown(String prompt, String content) {
+        boolean chinese = ResponseLanguageHelper.detect(prompt) == ResponseLanguageHelper.Language.ZH_CN;
+        if (chinese) {
+            return """
+                    ## 回复
 
-                            %s
-
-                            %s
-                            """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools(), languageDirective))
-                    .user("""
-                            Objective: %s
-
-                            Current plan:
-                            %s
-
-                            Execute only this step and summarize the result:
-                            %s
-                            """.formatted(objective, planningTools.getPlan(planId), step))
-                    .tools(workspaceTools, shellTools, planningTools, mcpToolBridge, browserAutomationTools, sandboxTools)
-                    .call()
-                    .content();
-            results.add(stepPrefix + (i + 1) + ": " + stepResult);
-            session.addExecutionLog(stepPrefix + (i + 1) + ": " + step + " => " + stepResult);
+                    %s
+                    """.formatted(content).trim();
         }
+        return """
+                ## Reply
 
-        String summary = String.join("\n\n", results);
-        session.addMessage("assistant", summary);
-        return new AgentResponse("plan-execute", summary, plan.steps());
+                %s
+                """.formatted(content).trim();
     }
 }
