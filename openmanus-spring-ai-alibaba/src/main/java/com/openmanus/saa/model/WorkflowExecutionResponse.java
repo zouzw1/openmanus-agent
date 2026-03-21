@@ -6,6 +6,15 @@ public record WorkflowExecutionResponse(
         String objective,
         List<WorkflowStep> steps,
         List<String> executionLog,
-        String summary
+        WorkflowSummary summary,
+        HumanFeedbackRequest pendingFeedback
 ) {
+    public WorkflowExecutionResponse(
+            String objective,
+            List<WorkflowStep> steps,
+            List<String> executionLog,
+            WorkflowSummary summary
+    ) {
+        this(objective, steps, executionLog, summary, null);
+    }
 }

@@ -12,6 +12,7 @@ import com.openmanus.saa.tool.McpToolBridge;
 import com.openmanus.saa.tool.BrowserAutomationTools;
 import com.openmanus.saa.tool.SandboxTools;
 import com.openmanus.saa.tool.WorkspaceTools;
+import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -63,12 +64,15 @@ public class ManusAgentService {
         SessionState session = sessionMemoryService.getOrCreate(sessionId);
         session.addMessage("user", prompt);
         String history = sessionMemoryService.summarizeHistory(session, 12);
+        String languageDirective = ResponseLanguageHelper.responseDirective(prompt);
         String content = chatClient.prompt()
                 .system("""
                         %s
 
                         %s
-                        """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools()))
+
+                        %s
+                        """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools(), languageDirective))
                 .user("""
                         Conversation history:
                         %s
@@ -89,6 +93,8 @@ public class ManusAgentService {
         PlanResponse plan = planningService.createPlan(objective);
         String planId = "plan-" + UUID.randomUUID();
         planningTools.createPlan(planId, plan.steps());
+        String languageDirective = ResponseLanguageHelper.responseDirective(objective);
+        String stepPrefix = "Step ";
 
         List<String> results = new ArrayList<>();
         int stepsToRun = Math.min(plan.steps().size(), properties.getMaxSteps());
@@ -99,7 +105,9 @@ public class ManusAgentService {
                             %s
 
                             %s
-                            """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools()))
+
+                            %s
+                            """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools(), languageDirective))
                     .user("""
                             Objective: %s
 
@@ -112,8 +120,8 @@ public class ManusAgentService {
                     .tools(workspaceTools, shellTools, planningTools, mcpToolBridge, browserAutomationTools, sandboxTools)
                     .call()
                     .content();
-            results.add("Step " + (i + 1) + ": " + stepResult);
-            session.addExecutionLog("Step " + (i + 1) + ": " + step + " => " + stepResult);
+            results.add(stepPrefix + (i + 1) + ": " + stepResult);
+            session.addExecutionLog(stepPrefix + (i + 1) + ": " + step + " => " + stepResult);
         }
 
         String summary = String.join("\n\n", results);

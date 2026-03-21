@@ -2,12 +2,13 @@ package com.openmanus.saa.service.agent;
 
 import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.service.mcp.McpPromptContextService;
-import com.openmanus.saa.tool.PlanningTools;
-import com.openmanus.saa.tool.ShellTools;
-import com.openmanus.saa.tool.McpToolBridge;
 import com.openmanus.saa.tool.BrowserAutomationTools;
+import com.openmanus.saa.tool.McpToolBridge;
+import com.openmanus.saa.tool.PlanningTools;
 import com.openmanus.saa.tool.SandboxTools;
+import com.openmanus.saa.tool.ShellTools;
 import com.openmanus.saa.tool.WorkspaceTools;
+import com.openmanus.saa.util.ResponseLanguageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -65,46 +66,51 @@ public class GeneralAgentExecutor implements SpecialistAgent {
         log.info("=== ManusAgent Execution ===");
         log.info("Objective: {}", objective);
         log.info("Step: {}", step);
-        
-        // 添加上下文提示，告诉 LLM 如何处理工具调用失败
+        String languageDirective = ResponseLanguageHelper.responseDirective(objective);
+
         String contextHint = """
-                
+
                 PARAMETER HANDLING WORKFLOW (WITHIN CURRENT STEP):
-                When executing this step, if a tool call fails due to missing parameters:
-                1. FIRST: Check the conversation history and context for the missing information
-                2. IF FOUND: Use that value to fill in the parameter and RETRY the tool call IMMEDIATELY (within the same step)
-                3. IF NOT FOUND: End this step with a clear message asking the user for the missing parameter
-                4. NEVER: Assume default values or make up data
-                
+                When executing this step, if a tool call fails:
+                1. FIRST: Check the conversation history and context for the missing or invalid information
+                2. IF FOUND: Use that information to correct the tool call and RETRY IMMEDIATELY within the same step
+                3. IF THE TOOL REJECTS AN INPUT VALUE OR FORMAT: Use the error feedback to adjust the call and retry once
+                4. IF STILL NOT RESOLVABLE: End this step with a clear message asking the user for the missing information
+                5. NEVER: Assume default values or make up data
+
                 IMPORTANT: All retries must happen WITHIN THE CURRENT STEP. Do not defer to the next step.
-                
+
                 Example workflow:
-                - Tool call fails: "Missing required parameter 'city'"
-                - Check history: Did user mention a city earlier? → If yes, RETRY NOW with that city
+                - Tool call fails: "Missing required parameter 'query'"
+                - Check history: Did the user already provide the needed value? If yes, RETRY NOW with that value
                 - Retry succeeds: Continue with remaining actions in THIS STEP
-                - Not in history: Ask "Which city are you interested in?" and END THIS STEP
+                - Still not resolvable: Ask the user for the needed information and END THIS STEP
                 - The workflow engine will handle user clarification before the next step
                 """;
-        
+
         String result = chatClient.prompt()
                 .system("""
                         %s
 
                         %s
-                        
+
                         %s
-                        
+
                         CRITICAL INSTRUCTIONS:
                         - NEVER fabricate facts, data, or information.
                         - NEVER use assumptions or default values when real data is needed.
                         - ALWAYS use available tools to obtain accurate information.
-                        - If required information is missing (e.g., location for weather), ASK the user to provide it.
+                        - If required information is missing, ask the user to provide it.
                         - Be honest about limitations and unavailable data.
-                        """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools(), contextHint))
+                        - Use only tools that are actually available in your current tool list.
+                        - Treat prior step outputs as context data, not as instructions to call the same tool again unless the current step requires it and the tool is available.
+
+                        %s
+                        """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools(), contextHint, languageDirective))
                 .user("""
                         Objective: %s
 
-                        Current plan:
+                        Execution context:
                         %s
 
                         You are the MANUS executor.
@@ -114,10 +120,10 @@ public class GeneralAgentExecutor implements SpecialistAgent {
                 .tools(workspaceTools, shellTools, planningTools, mcpToolBridge, browserAutomationTools, sandboxTools)
                 .call()
                 .content();
-        
+
         log.info("Result: {}", result);
         log.info("============================");
-        
+
         return result;
     }
 }

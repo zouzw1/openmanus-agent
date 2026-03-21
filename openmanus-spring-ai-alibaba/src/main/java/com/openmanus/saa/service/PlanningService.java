@@ -3,14 +3,17 @@ package com.openmanus.saa.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openmanus.saa.model.PlanResponse;
-import com.openmanus.saa.model.ToolMetadata;
 import com.openmanus.saa.model.WorkflowStep;
+import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +24,7 @@ import org.springframework.stereotype.Service;
 public class PlanningService {
 
     private static final Logger log = LoggerFactory.getLogger(PlanningService.class);
-    
+
     private final ChatClient chatClient;
     private final ToolRegistryService toolRegistryService;
     private final ObjectMapper objectMapper;
@@ -33,13 +36,28 @@ public class PlanningService {
     }
 
     public PlanResponse createPlan(String objective) {
+        String languageDirective = ResponseLanguageHelper.responseDirective(objective);
         String content = chatClient.prompt()
                 .system("""
-                        You are a planning assistant.
-                        Break the user's objective into 3 to 6 concise actionable steps.
-                        Return plain text only, one step per line, without numbering prefixes beyond the line content itself.
-                        """)
-                .user(objective)
+                        You are an expert Planning Agent tasked with solving problems efficiently through structured plans.
+                        Your job is:
+                        1. Analyze requests to understand the task scope
+                        2. Create a clear, actionable plan that makes meaningful progress
+                        3. Break tasks into logical steps with clear outcomes (3-6 steps)
+                        4. Consider dependencies and verification methods
+                        5. Know when to conclude - don't continue thinking once objectives are met
+
+                        Return plain text only, one step per line, without numbering prefixes.
+                        Each step should be concise and actionable.
+
+                        %s
+                        """.formatted(languageDirective))
+                .user("""
+                        Task: %s
+
+                        Return the plan only.
+                        Do not include reasoning.
+                        """.formatted(objective))
                 .call()
                 .content();
 
@@ -52,67 +70,75 @@ public class PlanningService {
     }
 
     public List<WorkflowStep> createWorkflowPlan(String objective, String availableAgents) {
-        // 获取所有可用工具的 Schema
         String toolsSchema = toolRegistryService.generateToolsPromptGuidance();
-        
-        // 第一步：让 LLM 制定计划并识别所需工具和参数
+        String languageDirective = ResponseLanguageHelper.responseDirective(objective);
+        Set<String> allowedAgents = parseAllowedAgents(availableAgents);
+
         String content = chatClient.prompt()
                 .system("""
-                        You are a workflow planning assistant.
-                        Break the objective into 3 to 6 concise actionable steps.
-                        Assign each step to exactly one available agent.
-                        Return plain text only.
-                        Each line must follow this format:
-                        [agent_name] step description
+                        You are an expert Planning Agent tasked with solving problems efficiently through structured plans.
+
+                        Your job is:
+                        1. Create a clear, actionable workflow plan with assigned agents.
+                        2. Break tasks into 2-5 concrete, non-overlapping steps.
+                        3. For each step, assign exactly one agent from available agents.
+                        4. Make the first step directly executable.
+                        5. Avoid duplicate or near-duplicate steps.
+                        6. Do not include reasoning, summaries, or commentary as steps.
 
                         Available agents:
                         %s
-                        
+
                         AVAILABLE TOOLS AND THEIR SCHEMAS:
                         %s
-                        
+
                         IMPORTANT PLANNING RULES:
-                        1. For each step, identify which tool(s) will be needed based on the tool schemas
-                        2. Ensure ALL required parameters for each tool can be obtained from:
-                           - User's original request
-                           - Previous step outputs
-                           - Context/history
-                        3. If a required parameter cannot be obtained, mark that step as needing user clarification
-                        4. Structure your step descriptions to include the expected tool usage
-                        """.formatted(availableAgents, toolsSchema))
-                .user(objective)
+                        1. Each step must be one executable action.
+                        2. The "agent" field MUST be one of the available agents, never a tool name.
+                        3. Never output meta steps such as "we need to..." or "the first step is...".
+                        4. Never restate the task as a step.
+                        5. If a required parameter cannot be obtained, create at most one explicit clarification step.
+                        6. Do not repeat the same tool call for the same target unless the task explicitly requires it.
+
+                        Return JSON only as an array.
+                        Each item must follow this schema:
+                        {
+                          "agent": "manus",
+                          "description": "use the appropriate tool to retrieve the required data"
+                        }
+
+                        %s
+                        """.formatted(availableAgents, toolsSchema, languageDirective))
+                .user("""
+                        Task: %s
+
+                        Output 2-5 executable steps only.
+                        Do not include reasoning.
+                        """.formatted(objective))
                 .call()
                 .content();
 
-        // 解析步骤（包含工具和参数信息）
-        List<WorkflowStep> steps = Arrays.stream(content.split("\\R"))
-                .map(String::trim)
-                .filter(line -> !line.isBlank())
-                .map(this::stripPrefix)
-                .map(this::toWorkflowStep)
-                .collect(Collectors.toList());
-        
-        // 第二步：对每个步骤，让 LLM 提取所需的工具和参数
-        return enrichStepsWithToolMetadata(steps, objective);
+        List<WorkflowStep> parsedSteps = parseWorkflowPlan(content, allowedAgents);
+        List<WorkflowStep> sanitizedSteps = sanitizeWorkflowSteps(parsedSteps, allowedAgents);
+        List<WorkflowStep> enrichedSteps = enrichStepsWithToolMetadata(sanitizedSteps, objective);
+        return removeDuplicateWorkflowSteps(enrichedSteps);
     }
-    
-    /**
-     * 为每个步骤补充工具元数据（requiredTools 和 parameterContext）
-     */
+
     private List<WorkflowStep> enrichStepsWithToolMetadata(List<WorkflowStep> steps, String objective) {
         return steps.stream().map(step -> {
             try {
-                // 使用 LLM 从步骤描述中提取工具名和参数
                 String extractionPrompt = """
                         Analyze this workflow step and extract the required tools and parameters.
-                        
+
                         Step description: %s
                         Original objective: %s
-                        
+
                         Based on the available tools schema, identify:
                         1. Which tool(s) are needed for this step?
                         2. What parameters can be extracted from the context?
-                        
+                        3. Use ONLY exact tool names and exact parameter names from the provided schemas.
+                        4. If a parameter name is not explicitly defined in the tool schema, do not invent an alias.
+
                         Return ONLY a JSON object in this exact format:
                         {
                           "requiredTools": ["tool1", "tool2"],
@@ -121,61 +147,235 @@ public class PlanningService {
                             "param2": "value2"
                           }
                         }
-                        
+
                         If no tools are needed, use empty array: []
                         If no parameters can be extracted, use empty object: {}
                         Do NOT include markdown formatting or explanations.
                         """.formatted(step.description(), objective);
-                
+
                 String jsonResponse = chatClient.prompt()
                         .user(extractionPrompt)
                         .call()
                         .content();
-                
-                // 清理响应（移除可能的 markdown 标记）
-                jsonResponse = jsonResponse.replaceAll("```json", "")
-                                          .replaceAll("```", "")
-                                          .trim();
-                
-                // 解析 JSON
-                var jsonNode = objectMapper.readTree(jsonResponse);
-                
-                // 提取 requiredTools
+
+                JsonNode jsonNode = objectMapper.readTree(stripMarkdownCodeFence(jsonResponse));
+
                 List<String> requiredTools = new ArrayList<>();
                 if (jsonNode.has("requiredTools") && jsonNode.get("requiredTools").isArray()) {
-                    for (var tool : jsonNode.get("requiredTools")) {
-                        requiredTools.add(tool.asText());
+                    for (JsonNode tool : jsonNode.get("requiredTools")) {
+                        String toolName = tool.asText();
+                        if (toolRegistryService.getTool(toolName).isPresent()) {
+                            requiredTools.add(toolName);
+                        }
                     }
                 }
-                
-                // 提取 parameters
+
                 Map<String, Object> parameters = new HashMap<>();
                 if (jsonNode.has("parameters") && jsonNode.get("parameters").isObject()) {
-                    var paramsNode = jsonNode.get("parameters");
-                    Iterator<Map.Entry<String, JsonNode>> fields = paramsNode.fields();
+                    Iterator<Map.Entry<String, JsonNode>> fields = jsonNode.get("parameters").fields();
+                    Set<String> allowedParameterNames = resolveAllowedParameterNames(requiredTools);
                     while (fields.hasNext()) {
-                        var entry = fields.next();
-                        parameters.put(entry.getKey(), entry.getValue().asText());
+                        Map.Entry<String, JsonNode> entry = fields.next();
+                        if (!allowedParameterNames.isEmpty() && allowedParameterNames.contains(entry.getKey())) {
+                            parameters.put(entry.getKey(), entry.getValue().asText());
+                        }
                     }
                 }
-                
-                log.info("Enriched step: {} -> tools={}, params={}", 
-                        step.description(), requiredTools, parameters);
-                
-                // 创建增强的 WorkflowStep
+
+                log.info("Enriched step: {} -> tools={}, params={}", step.description(), requiredTools, parameters);
                 return new WorkflowStep(step.agent(), step.description(), requiredTools, parameters);
-                
             } catch (Exception e) {
-                log.warn("Failed to extract tool metadata for step: {}, using defaults", 
-                        step.description(), e);
-                // 如果提取失败，返回原始步骤（使用兼容构造函数）
+                log.warn("Failed to extract tool metadata for step: {}, using defaults", step.description(), e);
                 return new WorkflowStep(step.agent(), step.description());
             }
         }).collect(Collectors.toList());
     }
 
+    private List<WorkflowStep> parseWorkflowPlan(String content, Set<String> allowedAgents) {
+        String normalizedContent = stripMarkdownCodeFence(content);
+        try {
+            JsonNode root = objectMapper.readTree(normalizedContent);
+            if (root.isArray()) {
+                List<WorkflowStep> steps = new ArrayList<>();
+                for (JsonNode node : root) {
+                    String agent = sanitizeAgentName(node.path("agent").asText("manus").trim(), allowedAgents);
+                    String description = node.path("description").asText("").trim();
+                    if (!description.isBlank()) {
+                        steps.add(new WorkflowStep(agent.isBlank() ? "manus" : agent, description));
+                    }
+                }
+                if (!steps.isEmpty()) {
+                    return steps;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse workflow plan as JSON, falling back to line parser", e);
+        }
+
+        return Arrays.stream(content.split("\\R"))
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .map(this::stripPrefix)
+                .map(this::toWorkflowStep)
+                .map(step -> new WorkflowStep(sanitizeAgentName(step.agent(), allowedAgents), step.description()))
+                .collect(Collectors.toList());
+    }
+
+    private List<WorkflowStep> sanitizeWorkflowSteps(List<WorkflowStep> steps, Set<String> allowedAgents) {
+        List<WorkflowStep> sanitized = new ArrayList<>();
+        for (WorkflowStep step : steps) {
+            String description = step.description().trim();
+            if (description.isBlank() || isMetaPlanningStep(description)) {
+                continue;
+            }
+
+            boolean duplicateDescription = sanitized.stream()
+                    .map(existing -> normalizeDescription(existing.description()))
+                    .anyMatch(normalized -> normalized.equals(normalizeDescription(description)));
+            if (!duplicateDescription) {
+                sanitized.add(new WorkflowStep(sanitizeAgentName(step.agent(), allowedAgents), description));
+            }
+        }
+        return sanitized.isEmpty() ? steps : sanitized;
+    }
+
+    private boolean isMetaPlanningStep(String description) {
+        String normalized = normalizeDescription(description);
+        return normalized.contains("thetaskis")
+                || normalized.contains("weneedto")
+                || normalized.contains("needtoquery")
+                || normalized.contains("thefirststepis")
+                || normalized.contains("\u5f53\u524d\u6ca1\u6709")
+                || normalized.contains("\u56e0\u6b64\u7b2c\u4e00\u6b65")
+                || normalized.contains("\u7b2c\u4e00\u6b65\u662f");
+    }
+
+    private List<WorkflowStep> removeDuplicateWorkflowSteps(List<WorkflowStep> steps) {
+        List<WorkflowStep> deduplicated = new ArrayList<>();
+        for (WorkflowStep candidate : steps) {
+            boolean duplicate = deduplicated.stream().anyMatch(existing -> areDuplicateWorkflowSteps(existing, candidate));
+            if (!duplicate) {
+                deduplicated.add(candidate);
+            }
+        }
+        return deduplicated.isEmpty() ? steps : deduplicated;
+    }
+
+    private boolean areDuplicateWorkflowSteps(WorkflowStep left, WorkflowStep right) {
+        if (normalizeDescription(left.description()).equals(normalizeDescription(right.description()))) {
+            return true;
+        }
+
+        String leftTool = normalizeValue(left.primaryTool());
+        String rightTool = normalizeValue(right.primaryTool());
+        if (leftTool.isBlank() || !leftTool.equals(rightTool)) {
+            return false;
+        }
+
+        Map<String, String> leftParams = canonicalizeParameters(left.parameterContext());
+        Map<String, String> rightParams = canonicalizeParameters(right.parameterContext());
+        if (leftParams.equals(rightParams)) {
+            return true;
+        }
+
+        String leftTarget = firstNonBlank(leftParams.get("location"), leftParams.get("url"), leftParams.get("path"), leftParams.get("query"));
+        String rightTarget = firstNonBlank(rightParams.get("location"), rightParams.get("url"), rightParams.get("path"), rightParams.get("query"));
+        if (leftTarget == null || !leftTarget.equals(rightTarget)) {
+            return false;
+        }
+
+        return noConflictingSharedParameters(leftParams, rightParams);
+    }
+
+    private boolean noConflictingSharedParameters(Map<String, String> leftParams, Map<String, String> rightParams) {
+        for (Map.Entry<String, String> entry : leftParams.entrySet()) {
+            String rightValue = rightParams.get(entry.getKey());
+            if (rightValue != null && !Objects.equals(entry.getValue(), rightValue)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Map<String, String> canonicalizeParameters(Map<String, Object> parameterContext) {
+        Map<String, String> canonical = new HashMap<>();
+        if (parameterContext == null) {
+            return canonical;
+        }
+
+        for (Map.Entry<String, Object> entry : parameterContext.entrySet()) {
+            String key = switch (entry.getKey()) {
+                case "city" -> "location";
+                case "date", "time_period" -> "time";
+                default -> entry.getKey();
+            };
+            String value = normalizeValue(String.valueOf(entry.getValue()));
+            if (!value.isBlank()) {
+                canonical.put(key, value);
+            }
+        }
+        return canonical;
+    }
+
+    private String stripMarkdownCodeFence(String content) {
+        if (content == null) {
+            return "";
+        }
+        return content.replace("```json", "").replace("```", "").trim();
+    }
+
     private String stripPrefix(String line) {
         return line.replaceFirst("^[-*\\d.\\s]+", "").trim();
+    }
+
+    private Set<String> parseAllowedAgents(String availableAgents) {
+        return Arrays.stream(availableAgents.split("\\R"))
+                .map(String::trim)
+                .filter(line -> line.startsWith("- "))
+                .map(line -> line.substring(2))
+                .map(line -> {
+                    int idx = line.indexOf(':');
+                    return idx >= 0 ? line.substring(0, idx).trim() : line.trim();
+                })
+                .filter(line -> !line.isBlank())
+                .collect(Collectors.toSet());
+    }
+
+    private String sanitizeAgentName(String rawAgent, Set<String> allowedAgents) {
+        if (rawAgent == null || rawAgent.isBlank()) {
+            return "manus";
+        }
+        return allowedAgents.contains(rawAgent) ? rawAgent : "manus";
+    }
+
+    private Set<String> resolveAllowedParameterNames(List<String> requiredTools) {
+        return requiredTools.stream()
+                .map(toolRegistryService::getTool)
+                .flatMap(Optional::stream)
+                .flatMap(tool -> tool.getParameters().stream())
+                .map(param -> param.getName())
+                .collect(Collectors.toSet());
+    }
+
+    private String normalizeDescription(String description) {
+        return description == null
+                ? ""
+                : description.toLowerCase()
+                        .replaceAll("[^\\p{L}\\p{N}]+", "")
+                        .trim();
+    }
+
+    private String normalizeValue(String value) {
+        return value == null ? "" : value.trim().toLowerCase();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private WorkflowStep toWorkflowStep(String line) {
