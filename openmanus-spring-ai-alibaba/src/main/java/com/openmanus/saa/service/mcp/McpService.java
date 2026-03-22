@@ -5,11 +5,13 @@ import com.openmanus.saa.config.McpProperties;
 import com.openmanus.saa.model.mcp.McpConnectRequest;
 import com.openmanus.saa.model.mcp.McpServerStatus;
 import com.openmanus.saa.model.mcp.McpToolCallResult;
+import com.openmanus.saa.model.mcp.McpToolMetadata;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,15 +40,35 @@ public class McpService {
         List<McpServerStatus> statuses = new ArrayList<>();
         for (Map.Entry<String, McpConnection> entry : connections.entrySet()) {
             McpConnection connection = entry.getValue();
+            List<McpToolMetadata> toolMetadata = connection.listToolMetadata();
             statuses.add(new McpServerStatus(
                     connection.serverId(),
                     connection.type(),
                     connection.connected(),
                     connection.endpoint(),
-                    connection.listTools()
+                    toolMetadata.stream().map(McpToolMetadata::name).toList()
             ));
         }
         return statuses;
+    }
+
+    public List<McpToolMetadata> listToolMetadata() {
+        return connections.values().stream()
+                .flatMap(connection -> connection.listToolMetadata().stream())
+                .toList();
+    }
+
+    public Optional<McpToolMetadata> findToolMetadata(String serverId, String toolName) {
+        if (serverId == null || serverId.isBlank() || toolName == null || toolName.isBlank()) {
+            return Optional.empty();
+        }
+        McpConnection connection = connections.get(serverId);
+        if (connection == null) {
+            return Optional.empty();
+        }
+        return connection.listToolMetadata().stream()
+                .filter(tool -> toolName.equals(tool.name()))
+                .findFirst();
     }
 
     public McpServerStatus connect(McpConnectRequest request) {
@@ -62,12 +84,13 @@ public class McpService {
                 request.args()
         );
         connections.put(request.serverId(), connection);
+        List<McpToolMetadata> toolMetadata = connection.listToolMetadata();
         return new McpServerStatus(
                 connection.serverId(),
                 connection.type(),
                 connection.connected(),
                 connection.endpoint(),
-                connection.listTools()
+                toolMetadata.stream().map(McpToolMetadata::name).toList()
         );
     }
 

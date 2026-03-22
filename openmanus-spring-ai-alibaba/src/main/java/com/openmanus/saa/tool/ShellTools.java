@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -31,7 +32,10 @@ public class ShellTools {
     }
 
     @Tool(description = "Execute a non-destructive PowerShell command inside the workspace")
-    public String runPowerShell(String command) throws IOException, InterruptedException {
+    public String runPowerShell(
+            @ToolParam(description = "Non-destructive PowerShell command to run inside the configured workspace.", required = true)
+            String command
+    ) throws IOException, InterruptedException {
         if (!properties.isShellEnabled()) {
             return "Shell tool is disabled. Enable openmanus.agent.shell-enabled to use it.";
         }

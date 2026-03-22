@@ -1,5 +1,6 @@
 package com.openmanus.saa.model.session;
 
+import com.openmanus.saa.model.InferencePolicy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,6 +12,7 @@ public class SessionState {
     private Instant updatedAt;
     private final List<ConversationMessage> messages = new ArrayList<>();
     private final List<String> executionLog = new ArrayList<>();
+    private InferencePolicy latestInferencePolicy;
 
     public SessionState(String sessionId) {
         this.sessionId = sessionId;
@@ -38,6 +40,10 @@ public class SessionState {
         return executionLog;
     }
 
+    public InferencePolicy getLatestInferencePolicy() {
+        return latestInferencePolicy;
+    }
+
     public void addMessage(String role, String content) {
         messages.add(new ConversationMessage(role, content, Instant.now()));
         updatedAt = Instant.now();
@@ -45,6 +51,11 @@ public class SessionState {
 
     public void addExecutionLog(String content) {
         executionLog.add(content);
+        updatedAt = Instant.now();
+    }
+
+    public void setLatestInferencePolicy(InferencePolicy latestInferencePolicy) {
+        this.latestInferencePolicy = latestInferencePolicy;
         updatedAt = Instant.now();
     }
 }

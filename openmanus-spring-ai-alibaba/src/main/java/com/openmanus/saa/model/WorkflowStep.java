@@ -6,166 +6,307 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 增强的 Workflow Step，包含完整的状态管理信息
- */
 public class WorkflowStep {
     private final String agent;
     private final String description;
-    private List<String> requiredTools;
-    private Map<String, Object> parameterContext;
-    private StepStatus status;
-    private String result;
-    private LocalDateTime startTime;
-    private LocalDateTime endTime;
-    private String errorMessage;
-    private Integer attemptCount;
-    private boolean needsHumanFeedback;
+    private final List<String> requiredTools;
+    private final List<String> usedTools;
+    private final List<String> usedCapabilities;
+    private final List<String> artifacts;
+    private final Map<String, Object> parameterContext;
+    private final StepStatus status;
+    private final String result;
+    private final LocalDateTime startTime;
+    private final LocalDateTime endTime;
+    private final String errorMessage;
+    private final Integer attemptCount;
+    private final boolean needsHumanFeedback;
 
-    // 向后兼容的构造函数 - 初始状态
     public WorkflowStep(String agent, String description) {
-        this.agent = agent;
-        this.description = description;
-        this.requiredTools = new ArrayList<>();
-        this.parameterContext = new HashMap<>();
-        this.status = StepStatus.NOT_STARTED;
-        this.result = null;
-        this.startTime = null;
-        this.endTime = null;
-        this.errorMessage = null;
-        this.attemptCount = 0;
-        this.needsHumanFeedback = false;
-    }
-    
-    // 便捷构造函数 - 带工具和参数（用于 PlanningService）
-    public WorkflowStep(String agent, String description, List<String> requiredTools, Map<String, Object> parameterContext) {
-        this.agent = agent;
-        this.description = description;
-        this.requiredTools = requiredTools != null ? requiredTools : new ArrayList<>();
-        this.parameterContext = parameterContext != null ? parameterContext : new HashMap<>();
-        this.status = StepStatus.NOT_STARTED;
-        this.result = null;
-        this.startTime = null;
-        this.endTime = null;
-        this.errorMessage = null;
-        this.attemptCount = 0;
-        this.needsHumanFeedback = false;
+        this(agent, description, List.of(), List.of(), List.of(), List.of(), Map.of(), StepStatus.NOT_STARTED, null, null, null, null, 0, false);
     }
 
-    // 全参数构造函数
-    public WorkflowStep(String agent, String description, List<String> requiredTools,
-                       Map<String, Object> parameterContext, StepStatus status, String result,
-                       LocalDateTime startTime, LocalDateTime endTime, String errorMessage,
-                       Integer attemptCount, boolean needsHumanFeedback) {
+    public WorkflowStep(String agent, String description, List<String> requiredTools, Map<String, Object> parameterContext) {
+        this(agent, description, requiredTools, List.of(), List.of(), List.of(), parameterContext, StepStatus.NOT_STARTED, null, null, null, null, 0, false);
+    }
+
+    public WorkflowStep(
+            String agent,
+            String description,
+            List<String> requiredTools,
+            Map<String, Object> parameterContext,
+            StepStatus status,
+            String result,
+            LocalDateTime startTime,
+            LocalDateTime endTime,
+            String errorMessage,
+            Integer attemptCount,
+            boolean needsHumanFeedback
+    ) {
+        this(agent, description, requiredTools, List.of(), List.of(), List.of(), parameterContext, status, result, startTime, endTime, errorMessage, attemptCount, needsHumanFeedback);
+    }
+
+    public WorkflowStep(
+            String agent,
+            String description,
+            List<String> requiredTools,
+            List<String> usedTools,
+            Map<String, Object> parameterContext,
+            StepStatus status,
+            String result,
+            LocalDateTime startTime,
+            LocalDateTime endTime,
+            String errorMessage,
+            Integer attemptCount,
+            boolean needsHumanFeedback
+    ) {
+        this(
+                agent,
+                description,
+                requiredTools,
+                usedTools,
+                List.of(),
+                List.of(),
+                parameterContext,
+                status,
+                result,
+                startTime,
+                endTime,
+                errorMessage,
+                attemptCount,
+                needsHumanFeedback
+        );
+    }
+
+    public WorkflowStep(
+            String agent,
+            String description,
+            List<String> requiredTools,
+            List<String> usedTools,
+            List<String> usedCapabilities,
+            List<String> artifacts,
+            Map<String, Object> parameterContext,
+            StepStatus status,
+            String result,
+            LocalDateTime startTime,
+            LocalDateTime endTime,
+            String errorMessage,
+            Integer attemptCount,
+            boolean needsHumanFeedback
+    ) {
         this.agent = agent;
         this.description = description;
-        this.requiredTools = requiredTools != null ? requiredTools : new ArrayList<>();
-        this.parameterContext = parameterContext != null ? parameterContext : new HashMap<>();
-        this.status = status != null ? status : StepStatus.NOT_STARTED;
+        this.requiredTools = requiredTools == null ? List.of() : new ArrayList<>(requiredTools);
+        this.usedTools = usedTools == null ? List.of() : new ArrayList<>(usedTools);
+        this.usedCapabilities = usedCapabilities == null ? List.of() : new ArrayList<>(usedCapabilities);
+        this.artifacts = artifacts == null ? List.of() : new ArrayList<>(artifacts);
+        this.parameterContext = parameterContext == null ? Map.of() : new HashMap<>(parameterContext);
+        this.status = status == null ? StepStatus.NOT_STARTED : status;
         this.result = result;
         this.startTime = startTime;
         this.endTime = endTime;
         this.errorMessage = errorMessage;
-        this.attemptCount = attemptCount != null ? attemptCount : 0;
+        this.attemptCount = attemptCount == null ? 0 : attemptCount;
         this.needsHumanFeedback = needsHumanFeedback;
     }
 
-    // Getters
     public String getAgent() { return agent; }
+
     public String getDescription() { return description; }
+
     public List<String> getRequiredTools() { return requiredTools; }
+
+    public List<String> getUsedTools() { return usedTools; }
+
+    public List<String> getUsedCapabilities() { return usedCapabilities; }
+
+    public List<String> getArtifacts() { return artifacts; }
+
     public Map<String, Object> getParameterContext() { return parameterContext; }
+
     public StepStatus getStatus() { return status; }
+
     public String getResult() { return result; }
+
     public LocalDateTime getStartTime() { return startTime; }
+
     public LocalDateTime getEndTime() { return endTime; }
+
     public String getErrorMessage() { return errorMessage; }
+
     public Integer getAttemptCount() { return attemptCount; }
+
     public boolean isNeedsHumanFeedback() { return needsHumanFeedback; }
-    
-    // Record-style accessors for backward compatibility (与 record 兼容)
+
     public String agent() { return getAgent(); }
+
     public String description() { return getDescription(); }
+
     public List<String> requiredTools() { return getRequiredTools(); }
+
+    public List<String> usedTools() { return getUsedTools(); }
+
+    public List<String> usedCapabilities() { return getUsedCapabilities(); }
+
+    public List<String> artifacts() { return getArtifacts(); }
+
     public Map<String, Object> parameterContext() { return getParameterContext(); }
+
     public StepStatus status() { return getStatus(); }
+
     public String result() { return getResult(); }
+
     public LocalDateTime startTime() { return getStartTime(); }
+
     public LocalDateTime endTime() { return getEndTime(); }
+
     public String errorMessage() { return getErrorMessage(); }
+
     public Integer attemptCount() { return getAttemptCount(); }
+
     public boolean needsHumanFeedback() { return isNeedsHumanFeedback(); }
 
-    /**
-     * 获取所需的第一个工具（主要工具）
-     */
     public String primaryTool() {
-        return (requiredTools != null && !requiredTools.isEmpty())
-            ? requiredTools.get(0)
-            : null;
+        return requiredTools.isEmpty() ? null : requiredTools.get(0);
     }
 
-    /**
-     * 创建当前步骤的副本并更新状态
-     */
     public WorkflowStep withStatus(StepStatus newStatus) {
         return new WorkflowStep(
-            this.agent, this.description, this.requiredTools, this.parameterContext,
-            newStatus, this.result, this.startTime, this.endTime,
-            this.errorMessage, this.attemptCount, this.needsHumanFeedback
+                agent,
+                description,
+                requiredTools,
+                usedTools,
+                usedCapabilities,
+                artifacts,
+                parameterContext,
+                newStatus,
+                result,
+                startTime,
+                endTime,
+                errorMessage,
+                attemptCount,
+                needsHumanFeedback
         );
     }
 
-    /**
-     * 创建当前步骤的副本并更新结果
-     */
     public WorkflowStep withResult(String newResult) {
+        return withResult(newResult, usedTools);
+    }
+
+    public WorkflowStep withResult(String newResult, List<String> newUsedTools) {
+        return withResult(newResult, newUsedTools, usedCapabilities);
+    }
+
+    public WorkflowStep withResult(String newResult, List<String> newUsedTools, List<String> newUsedCapabilities) {
+        return withResult(newResult, newUsedTools, newUsedCapabilities, artifacts);
+    }
+
+    public WorkflowStep withResult(String newResult, List<String> newUsedTools, List<String> newUsedCapabilities, List<String> newArtifacts) {
         return new WorkflowStep(
-            this.agent, this.description, this.requiredTools, this.parameterContext,
-            StepStatus.COMPLETED, newResult, this.startTime, LocalDateTime.now(),
-            null, this.attemptCount, false
+                agent,
+                description,
+                requiredTools,
+                newUsedTools,
+                newUsedCapabilities,
+                newArtifacts,
+                parameterContext,
+                StepStatus.COMPLETED,
+                newResult,
+                startTime,
+                LocalDateTime.now(),
+                null,
+                attemptCount,
+                false
         );
     }
 
-    /**
-     * 创建当前步骤的副本并标记需要人工反馈
-     */
     public WorkflowStep withHumanFeedbackNeeded(String error) {
+        return withHumanFeedbackNeeded(error, usedTools);
+    }
+
+    public WorkflowStep withHumanFeedbackNeeded(String error, List<String> newUsedTools) {
+        return withHumanFeedbackNeeded(error, newUsedTools, usedCapabilities);
+    }
+
+    public WorkflowStep withHumanFeedbackNeeded(String error, List<String> newUsedTools, List<String> newUsedCapabilities) {
+        return withHumanFeedbackNeeded(error, newUsedTools, newUsedCapabilities, artifacts);
+    }
+
+    public WorkflowStep withHumanFeedbackNeeded(String error, List<String> newUsedTools, List<String> newUsedCapabilities, List<String> newArtifacts) {
         return new WorkflowStep(
-            this.agent, this.description, this.requiredTools, this.parameterContext,
-            StepStatus.FAILED_NEEDS_HUMAN_INTERVENTION, null, this.startTime, null,
-            error, this.attemptCount + 1, true
+                agent,
+                description,
+                requiredTools,
+                newUsedTools,
+                newUsedCapabilities,
+                newArtifacts,
+                parameterContext,
+                StepStatus.FAILED_NEEDS_HUMAN_INTERVENTION,
+                null,
+                startTime,
+                null,
+                error,
+                attemptCount + 1,
+                true
         );
     }
 
-    /**
-     * 创建当前步骤的副本并增加尝试次数
-     */
+    public WorkflowStep withFailure(String error, List<String> newUsedTools, int attempts) {
+        return withFailure(error, newUsedTools, usedCapabilities, attempts);
+    }
+
+    public WorkflowStep withFailure(String error, List<String> newUsedTools, List<String> newUsedCapabilities, int attempts) {
+        return withFailure(error, newUsedTools, newUsedCapabilities, artifacts, attempts);
+    }
+
+    public WorkflowStep withFailure(String error, List<String> newUsedTools, List<String> newUsedCapabilities, List<String> newArtifacts, int attempts) {
+        return new WorkflowStep(
+                agent,
+                description,
+                requiredTools,
+                newUsedTools,
+                newUsedCapabilities,
+                newArtifacts,
+                parameterContext,
+                StepStatus.FAILED,
+                null,
+                startTime,
+                LocalDateTime.now(),
+                error,
+                attempts,
+                false
+        );
+    }
+
     public WorkflowStep withRetry() {
         return new WorkflowStep(
-            this.agent, this.description, this.requiredTools, this.parameterContext,
-            StepStatus.IN_PROGRESS, null, this.startTime, null,
-            null, this.attemptCount + 1, false
+                agent,
+                description,
+                requiredTools,
+                usedTools,
+                usedCapabilities,
+                artifacts,
+                parameterContext,
+                StepStatus.IN_PROGRESS,
+                null,
+                startTime,
+                null,
+                null,
+                attemptCount + 1,
+                false
         );
     }
 
-    /**
-     * 判断步骤是否已完成
-     */
     public boolean isCompleted() {
-        return this.status == StepStatus.COMPLETED || this.status == StepStatus.SKIPPED;
+        return status == StepStatus.COMPLETED || status == StepStatus.SKIPPED;
     }
 
-    /**
-     * 判断步骤是否需要人工介入
-     */
     public boolean needsHumanIntervention() {
-        return this.status.needsHumanIntervention() || this.needsHumanFeedback;
+        return status.needsHumanIntervention() || needsHumanFeedback;
     }
 
     @Override
     public String toString() {
-        return String.format("WorkflowStep{agent='%s', desc='%s', status=%s, attempts=%d}",
-            agent, description, status, attemptCount);
+        return String.format("WorkflowStep{agent='%s', desc='%s', status=%s, attempts=%d}", agent, description, status, attemptCount);
     }
 }

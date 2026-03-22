@@ -1,14 +1,23 @@
 package com.openmanus.saa.service.mcp;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openmanus.saa.model.ToolMetadata.ParameterSchema;
 import com.openmanus.saa.model.mcp.McpToolCallResult;
+import com.openmanus.saa.model.mcp.McpToolMetadata;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 public class StdioMcpConnection implements McpConnection {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final String serverId;
     private final String endpoint;
@@ -44,11 +53,18 @@ public class StdioMcpConnection implements McpConnection {
 
     @Override
     public List<String> listTools() {
+        return listToolMetadata().stream()
+                .map(McpToolMetadata::name)
+                .toList();
+    }
+
+    @Override
+    public List<McpToolMetadata> listToolMetadata() {
         String payload = """
                 {"jsonrpc":"2.0","id":"list-tools","method":"tools/list","params":{}}
                 """;
         McpToolCallResult result = runRequest(payload, "tools/list");
-        return List.of(result.output());
+        return parseToolMetadata(result);
     }
 
     @Override
@@ -62,6 +78,66 @@ public class StdioMcpConnection implements McpConnection {
 
     @Override
     public void close() {
+    }
+
+    private List<McpToolMetadata> parseToolMetadata(McpToolCallResult result) {
+        if (!result.success()) {
+            return List.of(new McpToolMetadata(serverId, "unavailable", result.output(), List.of()));
+        }
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(result.output());
+            JsonNode toolsNode = root.path("result").path("tools");
+            if (!toolsNode.isArray()) {
+                return List.of();
+            }
+            List<McpToolMetadata> tools = new ArrayList<>();
+            for (JsonNode toolNode : toolsNode) {
+                tools.add(new McpToolMetadata(
+                        serverId,
+                        toolNode.path("name").asText(),
+                        toolNode.path("description").asText(),
+                        extractParameterSchemas(toolNode.path("inputSchema"))
+                ));
+            }
+            return tools;
+        } catch (Exception ignored) {
+            return List.of(new McpToolMetadata(serverId, "unavailable", result.output(), List.of()));
+        }
+    }
+
+    private List<ParameterSchema> extractParameterSchemas(JsonNode schemaNode) {
+        if (schemaNode == null || !schemaNode.isObject()) {
+            return List.of();
+        }
+        JsonNode propertiesNode = schemaNode.path("properties");
+        if (!propertiesNode.isObject()) {
+            return List.of();
+        }
+        Set<String> requiredNames = OBJECT_MAPPER.convertValue(
+                schemaNode.path("required"),
+                new TypeReference<Set<String>>() { }
+        );
+        List<ParameterSchema> parameters = new ArrayList<>();
+        java.util.Iterator<Map.Entry<String, JsonNode>> fields = propertiesNode.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            JsonNode parameterNode = field.getValue();
+            List<String> enumValues = parameterNode.path("enum").isArray()
+                    ? OBJECT_MAPPER.convertValue(parameterNode.path("enum"), new TypeReference<List<String>>() { })
+                    : null;
+            Object defaultValue = parameterNode.has("default")
+                    ? OBJECT_MAPPER.convertValue(parameterNode.get("default"), Object.class)
+                    : null;
+            parameters.add(new ParameterSchema(
+                    field.getKey(),
+                    parameterNode.path("type").asText("string"),
+                    parameterNode.path("description").asText("Parameter '" + field.getKey() + "'."),
+                    requiredNames.contains(field.getKey()),
+                    defaultValue,
+                    enumValues
+            ));
+        }
+        return parameters;
     }
 
     private McpToolCallResult runRequest(String payload, String toolName) {

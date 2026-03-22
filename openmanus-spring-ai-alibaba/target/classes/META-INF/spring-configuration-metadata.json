@@ -6,6 +6,17 @@
       "sourceType": "com.openmanus.saa.config.OpenManusProperties"
     },
     {
+      "name": "openmanus.agent.planning-validation",
+      "type": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "sourceMethod": "getPlanningValidation()"
+    },
+    {
+      "name": "openmanus.agents",
+      "type": "com.openmanus.saa.config.AgentRegistryProperties",
+      "sourceType": "com.openmanus.saa.config.AgentRegistryProperties"
+    },
+    {
       "name": "openmanus.browser",
       "type": "com.openmanus.saa.config.BrowserProperties",
       "sourceType": "com.openmanus.saa.config.BrowserProperties"
@@ -30,52 +41,140 @@
     {
       "name": "openmanus.agent.max-steps",
       "type": "java.lang.Integer",
-      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "defaultValue": 8
+    },
+    {
+      "name": "openmanus.agent.planning-validation.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.fail-on-errors",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.validate-agent-capabilities",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.validate-local-tool-parameters",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.validate-mcp-arguments",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.validate-mcp-capabilities",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.validate-requested-deliverable",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agent.planning-validation.validate-skill-output-formats",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties$PlanningValidationProperties",
+      "defaultValue": true
     },
     {
       "name": "openmanus.agent.shell-enabled",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "defaultValue": false
     },
     {
       "name": "openmanus.agent.shell-timeout-seconds",
       "type": "java.lang.Integer",
-      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "defaultValue": 15
     },
     {
       "name": "openmanus.agent.system-prompt",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "defaultValue": ""
     },
     {
       "name": "openmanus.agent.workflow-use-data-analysis-agent",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "defaultValue": true
     },
     {
       "name": "openmanus.agent.workspace",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.OpenManusProperties"
+      "sourceType": "com.openmanus.saa.config.OpenManusProperties",
+      "defaultValue": ".\/workspace"
+    },
+    {
+      "name": "openmanus.agents.auto-reload",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.AgentRegistryProperties",
+      "defaultValue": false
+    },
+    {
+      "name": "openmanus.agents.config-location",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.AgentRegistryProperties",
+      "defaultValue": ".\/agents"
+    },
+    {
+      "name": "openmanus.agents.default-chat-agent-id",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.AgentRegistryProperties",
+      "defaultValue": "manus"
+    },
+    {
+      "name": "openmanus.agents.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.AgentRegistryProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.agents.fail-fast",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.AgentRegistryProperties",
+      "defaultValue": true
     },
     {
       "name": "openmanus.browser.enabled",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+      "sourceType": "com.openmanus.saa.config.BrowserProperties",
+      "defaultValue": false
     },
     {
       "name": "openmanus.browser.headless",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+      "sourceType": "com.openmanus.saa.config.BrowserProperties",
+      "defaultValue": true
     },
     {
       "name": "openmanus.browser.timeout-seconds",
       "type": "java.lang.Integer",
-      "sourceType": "com.openmanus.saa.config.BrowserProperties"
+      "sourceType": "com.openmanus.saa.config.BrowserProperties",
+      "defaultValue": 30
     },
     {
       "name": "openmanus.mcp.enabled",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.McpProperties"
+      "sourceType": "com.openmanus.saa.config.McpProperties",
+      "defaultValue": false
     },
     {
       "name": "openmanus.mcp.servers",
@@ -85,52 +184,62 @@
     {
       "name": "openmanus.sandbox.enabled",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": false
     },
     {
       "name": "openmanus.sandbox.image",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": "python:3.12-slim"
     },
     {
       "name": "openmanus.sandbox.memory-limit",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": "512m"
     },
     {
       "name": "openmanus.sandbox.network-enabled",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": false
     },
     {
       "name": "openmanus.sandbox.timeout-seconds",
       "type": "java.lang.Integer",
-      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": 30
     },
     {
       "name": "openmanus.sandbox.working-directory",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.SandboxProperties"
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": "\/workspace"
     },
     {
       "name": "openmanus.skills.enabled",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+      "sourceType": "com.openmanus.saa.config.SkillsProperties",
+      "defaultValue": true
     },
     {
       "name": "openmanus.skills.lazy-load",
       "type": "java.lang.Boolean",
-      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+      "sourceType": "com.openmanus.saa.config.SkillsProperties",
+      "defaultValue": true
     },
     {
       "name": "openmanus.skills.project-skills-directory",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+      "sourceType": "com.openmanus.saa.config.SkillsProperties",
+      "defaultValue": ".\/skills\/project"
     },
     {
       "name": "openmanus.skills.user-skills-directory",
       "type": "java.lang.String",
-      "sourceType": "com.openmanus.saa.config.SkillsProperties"
+      "sourceType": "com.openmanus.saa.config.SkillsProperties",
+      "defaultValue": ".\/skills\/user"
     }
   ],
   "hints": []

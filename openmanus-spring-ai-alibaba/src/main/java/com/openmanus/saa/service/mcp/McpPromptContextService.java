@@ -2,7 +2,9 @@ package com.openmanus.saa.service.mcp;
 
 import com.openmanus.saa.config.McpProperties;
 import com.openmanus.saa.model.mcp.McpServerStatus;
+import com.openmanus.saa.model.mcp.McpToolMetadata;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +24,10 @@ public class McpPromptContextService {
     }
 
     public String describeAvailableTools() {
+        return describeAvailableTools(true, null, null);
+    }
+
+    public String describeAvailableTools(boolean allowAll, java.util.Set<String> allowedServers, java.util.Set<String> allowedTools) {
         if (!properties.isEnabled()) {
             String description = """
                     MCP status:
@@ -31,11 +37,15 @@ public class McpPromptContextService {
             return description;
         }
 
-        List<McpServerStatus> servers = mcpService.listServers();
+        List<McpServerStatus> servers = mcpService.listServers().stream()
+                .filter(server -> isServerVisible(server, allowAll, allowedServers, allowedTools))
+                .map(server -> filterServerTools(server, allowAll, allowedServers, allowedTools))
+                .filter(server -> server.tools() == null || !server.tools().isEmpty() || (allowedServers != null && allowedServers.contains(server.serverId())))
+                .toList();
         if (servers.isEmpty()) {
             String description = """
                     MCP status:
-                    - MCP is enabled, but no MCP servers are connected.
+                    - MCP is enabled, but no allowed MCP servers or tools are currently available.
                     """;
             log.debug("MCP Tools Description (no servers): {}", description);
             return description;
@@ -61,10 +71,67 @@ public class McpPromptContextService {
     }
 
     private String describeServer(McpServerStatus server) {
-        String tools = server.tools() == null || server.tools().isEmpty()
-                ? "(no tools reported)"
-                : String.join(", ", server.tools());
-        return "- serverId=%s, type=%s, connected=%s, tools=%s"
-                .formatted(server.serverId(), server.type(), server.connected(), tools);
+        Map<String, McpToolMetadata> metadataByName = mcpService.listToolMetadata().stream()
+                .filter(tool -> server.serverId().equals(tool.serverId()))
+                .collect(Collectors.toMap(
+                        McpToolMetadata::name,
+                        tool -> tool,
+                        (left, right) -> left
+                ));
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("- serverId=")
+                .append(server.serverId())
+                .append(", type=")
+                .append(server.type())
+                .append(", connected=")
+                .append(server.connected())
+                .append("\n");
+
+        if (server.tools() == null || server.tools().isEmpty()) {
+            builder.append("  - (no tools reported)");
+            return builder.toString();
+        }
+
+        for (String toolName : server.tools()) {
+            McpToolMetadata metadata = metadataByName.get(toolName);
+            if (metadata == null) {
+                builder.append("  - tool=").append(toolName).append("\n");
+                continue;
+            }
+            builder.append(metadata.toPromptGuidance());
+        }
+        return builder.toString().trim();
+    }
+
+    private boolean isServerVisible(McpServerStatus server, boolean allowAll, java.util.Set<String> allowedServers, java.util.Set<String> allowedTools) {
+        if (allowAll) {
+            return true;
+        }
+        if (allowedServers != null && allowedServers.contains(server.serverId())) {
+            return true;
+        }
+        if (allowedTools == null || allowedTools.isEmpty()) {
+            return false;
+        }
+        String prefix = server.serverId() + "/";
+        return allowedTools.stream().anyMatch(tool -> tool.startsWith(prefix));
+    }
+
+    private McpServerStatus filterServerTools(
+            McpServerStatus server,
+            boolean allowAll,
+            java.util.Set<String> allowedServers,
+            java.util.Set<String> allowedTools
+    ) {
+        if (allowAll || (allowedServers != null && allowedServers.contains(server.serverId()))) {
+            return server;
+        }
+        List<String> filteredTools = server.tools() == null
+                ? List.of()
+                : server.tools().stream()
+                        .filter(tool -> allowedTools != null && allowedTools.contains(server.serverId() + "/" + tool))
+                        .toList();
+        return new McpServerStatus(server.serverId(), server.type(), server.connected(), server.endpoint(), filteredTools);
     }
 }

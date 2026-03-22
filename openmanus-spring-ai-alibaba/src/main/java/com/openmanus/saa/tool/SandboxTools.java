@@ -3,6 +3,7 @@ package com.openmanus.saa.tool;
 import com.openmanus.saa.model.sandbox.SandboxCommandResponse;
 import com.openmanus.saa.service.sandbox.SandboxService;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -15,7 +16,10 @@ public class SandboxTools {
     }
 
     @Tool(description = "Execute a non-destructive shell command inside a Docker sandbox")
-    public String runSandboxCommand(String command) {
+    public String runSandboxCommand(
+            @ToolParam(description = "Non-destructive shell command to execute inside the sandbox.", required = true)
+            String command
+    ) {
         SandboxCommandResponse response = sandboxService.execute(command);
         return response.success() ? response.output() : "Sandbox command failed: " + response.output();
     }

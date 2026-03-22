@@ -7,6 +7,7 @@ import com.openmanus.saa.service.mcp.McpService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -24,7 +25,14 @@ public class McpToolBridge {
     }
 
     @Tool(description = "Call a tool from a connected MCP server using serverId, toolName, and JSON arguments")
-    public String callMcpTool(String serverId, String toolName, String argumentsJson) {
+    public String callMcpTool(
+            @ToolParam(description = "Connected MCP server identifier, for example demo-sse.", required = true)
+            String serverId,
+            @ToolParam(description = "Exact tool name exposed by the target MCP server.", required = true)
+            String toolName,
+            @ToolParam(description = "JSON string containing the arguments to pass to the MCP tool.", required = true)
+            String argumentsJson
+    ) {
         if (!properties.isEnabled()) {
             return "MCP is disabled.";
         }

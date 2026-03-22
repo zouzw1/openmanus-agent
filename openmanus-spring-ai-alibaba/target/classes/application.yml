@@ -9,12 +9,27 @@ server:
   port: 8080
 
 openmanus:
+  agents:
+    enabled: true
+    config-location: ./agents
+    fail-fast: true
+    auto-reload: false
+    default-chat-agent-id: manus
   agent:
     max-steps: 8
     workspace: ./workspace
     shell-enabled: false
     shell-timeout-seconds: 15
     workflow-use-data-analysis-agent: true
+    planning-validation:
+      enabled: false
+      fail-on-errors: true
+      validate-requested-deliverable: true
+      validate-agent-capabilities: true
+      validate-skill-output-formats: true
+      validate-local-tool-parameters: true
+      validate-mcp-capabilities: true
+      validate-mcp-arguments: true
     system-prompt: |
       You are OpenManus implemented with Spring AI Alibaba.
       Solve user tasks with concise reasoning and tool usage when needed.

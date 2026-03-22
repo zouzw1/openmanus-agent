@@ -9,6 +9,7 @@ import java.nio.file.Paths;
 import java.util.Comparator;
 import java.util.stream.Collectors;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,7 +23,10 @@ public class WorkspaceTools {
     }
 
     @Tool(description = "List files under the configured workspace directory")
-    public String listWorkspaceFiles(String relativePath) throws IOException {
+    public String listWorkspaceFiles(
+            @ToolParam(description = "Optional relative path inside the workspace to inspect. Defaults to the workspace root.", required = false)
+            String relativePath
+    ) throws IOException {
         Path target = resolve(relativePath);
         if (!Files.exists(target)) {
             return "Path does not exist: " + target;
@@ -43,7 +47,10 @@ public class WorkspaceTools {
     }
 
     @Tool(description = "Read a UTF-8 text file from the workspace")
-    public String readWorkspaceFile(String relativePath) throws IOException {
+    public String readWorkspaceFile(
+            @ToolParam(description = "Relative path of the UTF-8 text file to read from the workspace.", required = true)
+            String relativePath
+    ) throws IOException {
         Path target = resolve(relativePath);
         if (!Files.exists(target) || !Files.isRegularFile(target)) {
             return "File does not exist: " + target;
@@ -52,7 +59,12 @@ public class WorkspaceTools {
     }
 
     @Tool(description = "Write a UTF-8 text file to the workspace, replacing existing content")
-    public String writeWorkspaceFile(String relativePath, String content) throws IOException {
+    public String writeWorkspaceFile(
+            @ToolParam(description = "Relative path of the file to write inside the workspace.", required = true)
+            String relativePath,
+            @ToolParam(description = "Full UTF-8 text content that should replace the file contents.", required = true)
+            String content
+    ) throws IOException {
         Path target = resolve(relativePath);
         Files.createDirectories(target.getParent());
         Files.writeString(target, content, StandardCharsets.UTF_8);

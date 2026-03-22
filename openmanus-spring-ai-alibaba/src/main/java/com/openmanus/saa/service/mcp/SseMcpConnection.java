@@ -1,8 +1,11 @@
 package com.openmanus.saa.service.mcp;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openmanus.saa.model.mcp.McpToolCallResult;
+import com.openmanus.saa.model.mcp.McpToolMetadata;
+import com.openmanus.saa.model.ToolMetadata.ParameterSchema;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
@@ -15,6 +18,7 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,12 +80,21 @@ public class SseMcpConnection implements McpConnection {
 
     @Override
     public List<String> listTools() {
+        return listToolMetadata().stream()
+                .map(McpToolMetadata::name)
+                .toList();
+    }
+
+    @Override
+    public List<McpToolMetadata> listToolMetadata() {
         try {
             ensureInitialized();
             ListToolsResult result = client.listTools();
-            return result.tools().stream().map(Tool::name).toList();
+            return result.tools().stream()
+                    .map(this::toToolMetadata)
+                    .toList();
         } catch (Exception ex) {
-            return List.of("unavailable:" + messageFor(ex));
+            return List.of(new McpToolMetadata(serverId, "unavailable", messageFor(ex), List.of()));
         }
     }
 
@@ -131,6 +144,69 @@ public class SseMcpConnection implements McpConnection {
         String safeArgs = (argumentsJson == null || argumentsJson.isBlank()) ? "{}" : argumentsJson;
         return objectMapper.readValue(safeArgs, new TypeReference<>() {
         });
+    }
+
+    private McpToolMetadata toToolMetadata(Tool tool) {
+        return new McpToolMetadata(
+                serverId,
+                tool.name(),
+                tool.description(),
+                extractParameterSchemas(tool)
+        );
+    }
+
+    private List<ParameterSchema> extractParameterSchemas(Tool tool) {
+        JsonNode schemaNode = normalizeSchemaNode(tool.inputSchema());
+        if (schemaNode == null || !schemaNode.isObject()) {
+            return List.of();
+        }
+
+        JsonNode propertiesNode = schemaNode.path("properties");
+        if (!propertiesNode.isObject()) {
+            return List.of();
+        }
+
+        Set<String> requiredNames = objectMapper.convertValue(
+                schemaNode.path("required"),
+                new TypeReference<Set<String>>() { }
+        );
+
+        List<ParameterSchema> parameters = new java.util.ArrayList<>();
+        java.util.Iterator<Map.Entry<String, JsonNode>> fields = propertiesNode.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            JsonNode parameterNode = field.getValue();
+            List<String> enumValues = parameterNode.path("enum").isArray()
+                    ? objectMapper.convertValue(parameterNode.path("enum"), new TypeReference<List<String>>() { })
+                    : null;
+            Object defaultValue = parameterNode.has("default")
+                    ? objectMapper.convertValue(parameterNode.get("default"), Object.class)
+                    : null;
+            parameters.add(new ParameterSchema(
+                    field.getKey(),
+                    parameterNode.path("type").asText("string"),
+                    parameterNode.path("description").asText("Parameter '" + field.getKey() + "'."),
+                    requiredNames.contains(field.getKey()),
+                    defaultValue,
+                    enumValues
+            ));
+        }
+        return parameters;
+    }
+
+    private JsonNode normalizeSchemaNode(Object inputSchema) {
+        if (inputSchema == null) {
+            return null;
+        }
+        JsonNode schemaNode = objectMapper.valueToTree(inputSchema);
+        if (schemaNode.isTextual()) {
+            try {
+                return objectMapper.readTree(schemaNode.asText());
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return schemaNode;
     }
 
     private String renderToolResult(CallToolResult result) throws Exception {

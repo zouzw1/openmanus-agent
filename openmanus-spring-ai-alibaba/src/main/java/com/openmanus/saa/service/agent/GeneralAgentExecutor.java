@@ -1,13 +1,13 @@
 package com.openmanus.saa.service.agent;
 
+import com.openmanus.saa.agent.AgentDefinition;
+import com.openmanus.saa.agent.AgentRuntimeFactory;
+import com.openmanus.saa.agent.ResolvedAgentRuntime;
 import com.openmanus.saa.config.OpenManusProperties;
-import com.openmanus.saa.service.mcp.McpPromptContextService;
-import com.openmanus.saa.tool.BrowserAutomationTools;
-import com.openmanus.saa.tool.McpToolBridge;
-import com.openmanus.saa.tool.PlanningTools;
-import com.openmanus.saa.tool.SandboxTools;
-import com.openmanus.saa.tool.ShellTools;
-import com.openmanus.saa.tool.WorkspaceTools;
+import com.openmanus.saa.model.WorkflowStep;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import com.openmanus.saa.util.ResponseLanguageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,34 +21,16 @@ public class GeneralAgentExecutor implements SpecialistAgent {
 
     private final ChatClient chatClient;
     private final OpenManusProperties properties;
-    private final WorkspaceTools workspaceTools;
-    private final ShellTools shellTools;
-    private final PlanningTools planningTools;
-    private final McpToolBridge mcpToolBridge;
-    private final BrowserAutomationTools browserAutomationTools;
-    private final SandboxTools sandboxTools;
-    private final McpPromptContextService mcpPromptContextService;
+    private final AgentRuntimeFactory agentRuntimeFactory;
 
     public GeneralAgentExecutor(
             ChatClient chatClient,
             OpenManusProperties properties,
-            WorkspaceTools workspaceTools,
-            ShellTools shellTools,
-            PlanningTools planningTools,
-            McpToolBridge mcpToolBridge,
-            BrowserAutomationTools browserAutomationTools,
-            SandboxTools sandboxTools,
-            McpPromptContextService mcpPromptContextService
+            AgentRuntimeFactory agentRuntimeFactory
     ) {
         this.chatClient = chatClient;
         this.properties = properties;
-        this.workspaceTools = workspaceTools;
-        this.shellTools = shellTools;
-        this.planningTools = planningTools;
-        this.mcpToolBridge = mcpToolBridge;
-        this.browserAutomationTools = browserAutomationTools;
-        this.sandboxTools = sandboxTools;
-        this.mcpPromptContextService = mcpPromptContextService;
+        this.agentRuntimeFactory = agentRuntimeFactory;
     }
 
     @Override
@@ -62,11 +44,15 @@ public class GeneralAgentExecutor implements SpecialistAgent {
     }
 
     @Override
-    public String execute(String objective, String currentPlan, String step) {
+    public AgentExecutionResult execute(AgentDefinition agentDefinition, String objective, String currentPlan, WorkflowStep step, String stepPrompt) {
         log.info("=== ManusAgent Execution ===");
+        log.info("Agent ID: {}", agentDefinition.getId());
         log.info("Objective: {}", objective);
-        log.info("Step: {}", step);
+        log.info("Step: {}", stepPrompt);
         String languageDirective = ResponseLanguageHelper.responseDirective(objective);
+        List<String> usedTools = new ArrayList<>();
+        List<String> usedToolCalls = new ArrayList<>();
+        ResolvedAgentRuntime runtime = agentRuntimeFactory.resolveForStep(agentDefinition, step, usedTools, usedToolCalls);
 
         String contextHint = """
 
@@ -106,7 +92,7 @@ public class GeneralAgentExecutor implements SpecialistAgent {
                         - Treat prior step outputs as context data, not as instructions to call the same tool again unless the current step requires it and the tool is available.
 
                         %s
-                        """.formatted(properties.getSystemPrompt(), mcpPromptContextService.describeAvailableTools(), contextHint, languageDirective))
+                        """.formatted(properties.getSystemPrompt(), runtime.systemPrompt(), contextHint, languageDirective))
                 .user("""
                         Objective: %s
 
@@ -116,14 +102,20 @@ public class GeneralAgentExecutor implements SpecialistAgent {
                         You are the MANUS executor.
                         Execute only this step and summarize the result:
                         %s
-                        """.formatted(objective, currentPlan, step))
-                .tools(workspaceTools, shellTools, planningTools, mcpToolBridge, browserAutomationTools, sandboxTools)
+                        """.formatted(objective, currentPlan, stepPrompt))
+                .advisors(runtime.advisors())
+                .toolCallbacks(runtime.toolCallbacks())
+                .toolContext(runtime.toolContext())
                 .call()
                 .content();
 
         log.info("Result: {}", result);
         log.info("============================");
 
-        return result;
+        return new AgentExecutionResult(
+                result,
+                List.copyOf(new LinkedHashSet<>(usedTools)),
+                List.copyOf(usedToolCalls)
+        );
     }
 }

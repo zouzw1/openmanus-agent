@@ -44,7 +44,7 @@ public class AgentController {
 
     @PostMapping("/chat")
     public AgentResponse chat(@Valid @RequestBody AgentRequest request) {
-        return manusAgentService.routeChat(request.sessionId(), request.prompt());
+        return manusAgentService.routeChat(request.sessionId(), request.prompt(), request.agentId());
     }
 
     @PostMapping("/plan")

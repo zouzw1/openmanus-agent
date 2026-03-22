@@ -1,0 +1,36 @@
+id: manus
+name: Manus
+enabled: true
+executor-type: manus
+description: General-purpose execution agent for coding, file inspection, and tool orchestration.
+planning-visible: true
+priority: 100
+prompt:
+  file: prompts/manus.md
+capabilities:
+  local-tools:
+    mode: allow_list
+    ids:
+      - tool:listWorkspaceFiles
+      - tool:readWorkspaceFile
+      - tool:writeWorkspaceFile
+      - tool:runPowerShell
+      - tool:createPlan
+      - tool:getPlan
+      - tool:browserAction
+      - tool:runSandboxCommand
+      - tool:callMcpTool
+  mcp:
+    mode: allow_list
+    servers:
+      - demo-sse
+  skills:
+    mode: allow_list
+    ids:
+      - skill:project-planning
+      - skill:pdf
+      - skill:pptx
+      - skill:docx
+      - skill:markdown-converter
+      - skill:skill-creator
+      - skill:tavily-search-pro

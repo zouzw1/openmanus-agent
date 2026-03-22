@@ -1,5 +1,6 @@
 package com.openmanus.saa;
 
+import com.openmanus.saa.config.AgentRegistryProperties;
 import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.config.McpProperties;
 import com.openmanus.saa.config.BrowserProperties;
@@ -11,6 +12,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 
 @SpringBootApplication
 @EnableConfigurationProperties({
+        AgentRegistryProperties.class,
         OpenManusProperties.class,
         McpProperties.class,
         BrowserProperties.class,

@@ -14,7 +14,6 @@ public class RequestRoutingService {
 
     public enum RouteMode {
         DIRECT_CHAT,
-        PLAN_ONLY,
         PLAN_EXECUTE
     }
 
@@ -33,7 +32,6 @@ public class RequestRoutingService {
 
                         Decide whether the user request should:
                         - DIRECT_CHAT: respond directly in one answer without making a plan first.
-                        - PLAN_ONLY: generate a human-readable plan, but do not execute it.
                         - PLAN_EXECUTE: first create a plan, then execute it.
 
                         Choose DIRECT_CHAT when the request is:
@@ -42,22 +40,19 @@ public class RequestRoutingService {
                         - simple conversational Q&A
                         - a direct explanation that does not require tool orchestration or multi-step execution
 
-                        Choose PLAN_ONLY when the request is:
-                        - asking for a plan, outline, checklist, roadmap, schedule, or strategy
-                        - asking to organize work before execution
-                        - asking to review or confirm the plan first
-                        - not asking you to actually carry out the steps right now
-
                         Choose PLAN_EXECUTE when the request requires:
                         - multiple meaningful steps
                         - tool usage
                         - file or project inspection
                         - data retrieval and then processing
                         - execution, modification, generation, analysis, or verification work
+                        - creating or producing a concrete deliverable such as a file, document, report, markdown, word file, ppt, spreadsheet, or saved output
+                        - requests that mention a "plan" but also ask you to generate, write, export, format, save, or deliver the result
 
                         Examples:
                         - "hello" -> DIRECT_CHAT
-                        - "give me a study plan for next week" -> PLAN_ONLY
+                        - "give me a study plan for next week" -> PLAN_EXECUTE
+                        - "I want to go to Beijing, make me a plan and deliver it as a Word document" -> PLAN_EXECUTE
                         - "analyze this project and summarize module responsibilities" -> PLAN_EXECUTE
 
                         Return JSON only in this exact format:
@@ -93,9 +88,6 @@ public class RequestRoutingService {
         String upper = normalized.toUpperCase();
         if (upper.contains("DIRECT_CHAT")) {
             return RouteMode.DIRECT_CHAT;
-        }
-        if (upper.contains("PLAN_ONLY")) {
-            return RouteMode.PLAN_ONLY;
         }
         if (upper.contains("PLAN_EXECUTE")) {
             return RouteMode.PLAN_EXECUTE;

@@ -77,6 +77,10 @@ public class SessionMemoryService {
             if (feedback.getModifiedParams() != null && !feedback.getModifiedParams().isBlank()) {
                 session.addMessage("user", "[FEEDBACK_PARAMS] " + feedback.getModifiedParams());
             }
+            if (feedback.getInferencePolicy() != null) {
+                session.setLatestInferencePolicy(feedback.getInferencePolicy());
+                session.addExecutionLog("Inference policy updated: " + feedback.getInferencePolicy());
+            }
         }
         clearPendingFeedback(sessionId);
     }
