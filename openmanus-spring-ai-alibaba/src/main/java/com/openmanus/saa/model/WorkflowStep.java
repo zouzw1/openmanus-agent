@@ -13,6 +13,7 @@ public class WorkflowStep {
     private final List<String> usedTools;
     private final List<String> usedCapabilities;
     private final List<String> artifacts;
+    private final List<String> toolOutputs;
     private final Map<String, Object> parameterContext;
     private final StepStatus status;
     private final String result;
@@ -23,11 +24,11 @@ public class WorkflowStep {
     private final boolean needsHumanFeedback;
 
     public WorkflowStep(String agent, String description) {
-        this(agent, description, List.of(), List.of(), List.of(), List.of(), Map.of(), StepStatus.NOT_STARTED, null, null, null, null, 0, false);
+        this(agent, description, List.of(), List.of(), List.of(), List.of(), List.of(), Map.of(), StepStatus.NOT_STARTED, null, null, null, null, 0, false);
     }
 
     public WorkflowStep(String agent, String description, List<String> requiredTools, Map<String, Object> parameterContext) {
-        this(agent, description, requiredTools, List.of(), List.of(), List.of(), parameterContext, StepStatus.NOT_STARTED, null, null, null, null, 0, false);
+        this(agent, description, requiredTools, List.of(), List.of(), List.of(), List.of(), parameterContext, StepStatus.NOT_STARTED, null, null, null, null, 0, false);
     }
 
     public WorkflowStep(
@@ -43,7 +44,7 @@ public class WorkflowStep {
             Integer attemptCount,
             boolean needsHumanFeedback
     ) {
-        this(agent, description, requiredTools, List.of(), List.of(), List.of(), parameterContext, status, result, startTime, endTime, errorMessage, attemptCount, needsHumanFeedback);
+        this(agent, description, requiredTools, List.of(), List.of(), List.of(), List.of(), parameterContext, status, result, startTime, endTime, errorMessage, attemptCount, needsHumanFeedback);
     }
 
     public WorkflowStep(
@@ -67,6 +68,7 @@ public class WorkflowStep {
                 usedTools,
                 List.of(),
                 List.of(),
+                List.of(),
                 parameterContext,
                 status,
                 result,
@@ -85,6 +87,7 @@ public class WorkflowStep {
             List<String> usedTools,
             List<String> usedCapabilities,
             List<String> artifacts,
+            List<String> toolOutputs,
             Map<String, Object> parameterContext,
             StepStatus status,
             String result,
@@ -100,6 +103,7 @@ public class WorkflowStep {
         this.usedTools = usedTools == null ? List.of() : new ArrayList<>(usedTools);
         this.usedCapabilities = usedCapabilities == null ? List.of() : new ArrayList<>(usedCapabilities);
         this.artifacts = artifacts == null ? List.of() : new ArrayList<>(artifacts);
+        this.toolOutputs = toolOutputs == null ? List.of() : new ArrayList<>(toolOutputs);
         this.parameterContext = parameterContext == null ? Map.of() : new HashMap<>(parameterContext);
         this.status = status == null ? StepStatus.NOT_STARTED : status;
         this.result = result;
@@ -121,6 +125,8 @@ public class WorkflowStep {
     public List<String> getUsedCapabilities() { return usedCapabilities; }
 
     public List<String> getArtifacts() { return artifacts; }
+
+    public List<String> getToolOutputs() { return toolOutputs; }
 
     public Map<String, Object> getParameterContext() { return parameterContext; }
 
@@ -150,6 +156,8 @@ public class WorkflowStep {
 
     public List<String> artifacts() { return getArtifacts(); }
 
+    public List<String> toolOutputs() { return getToolOutputs(); }
+
     public Map<String, Object> parameterContext() { return getParameterContext(); }
 
     public StepStatus status() { return getStatus(); }
@@ -178,6 +186,7 @@ public class WorkflowStep {
                 usedTools,
                 usedCapabilities,
                 artifacts,
+                toolOutputs,
                 parameterContext,
                 newStatus,
                 result,
@@ -198,10 +207,20 @@ public class WorkflowStep {
     }
 
     public WorkflowStep withResult(String newResult, List<String> newUsedTools, List<String> newUsedCapabilities) {
-        return withResult(newResult, newUsedTools, newUsedCapabilities, artifacts);
+        return withResult(newResult, newUsedTools, newUsedCapabilities, artifacts, toolOutputs);
     }
 
     public WorkflowStep withResult(String newResult, List<String> newUsedTools, List<String> newUsedCapabilities, List<String> newArtifacts) {
+        return withResult(newResult, newUsedTools, newUsedCapabilities, newArtifacts, toolOutputs);
+    }
+
+    public WorkflowStep withResult(
+            String newResult,
+            List<String> newUsedTools,
+            List<String> newUsedCapabilities,
+            List<String> newArtifacts,
+            List<String> newToolOutputs
+    ) {
         return new WorkflowStep(
                 agent,
                 description,
@@ -209,6 +228,7 @@ public class WorkflowStep {
                 newUsedTools,
                 newUsedCapabilities,
                 newArtifacts,
+                newToolOutputs,
                 parameterContext,
                 StepStatus.COMPLETED,
                 newResult,
@@ -229,10 +249,20 @@ public class WorkflowStep {
     }
 
     public WorkflowStep withHumanFeedbackNeeded(String error, List<String> newUsedTools, List<String> newUsedCapabilities) {
-        return withHumanFeedbackNeeded(error, newUsedTools, newUsedCapabilities, artifacts);
+        return withHumanFeedbackNeeded(error, newUsedTools, newUsedCapabilities, artifacts, toolOutputs);
     }
 
     public WorkflowStep withHumanFeedbackNeeded(String error, List<String> newUsedTools, List<String> newUsedCapabilities, List<String> newArtifacts) {
+        return withHumanFeedbackNeeded(error, newUsedTools, newUsedCapabilities, newArtifacts, toolOutputs);
+    }
+
+    public WorkflowStep withHumanFeedbackNeeded(
+            String error,
+            List<String> newUsedTools,
+            List<String> newUsedCapabilities,
+            List<String> newArtifacts,
+            List<String> newToolOutputs
+    ) {
         return new WorkflowStep(
                 agent,
                 description,
@@ -240,6 +270,7 @@ public class WorkflowStep {
                 newUsedTools,
                 newUsedCapabilities,
                 newArtifacts,
+                newToolOutputs,
                 parameterContext,
                 StepStatus.FAILED_NEEDS_HUMAN_INTERVENTION,
                 null,
@@ -256,10 +287,21 @@ public class WorkflowStep {
     }
 
     public WorkflowStep withFailure(String error, List<String> newUsedTools, List<String> newUsedCapabilities, int attempts) {
-        return withFailure(error, newUsedTools, newUsedCapabilities, artifacts, attempts);
+        return withFailure(error, newUsedTools, newUsedCapabilities, artifacts, toolOutputs, attempts);
     }
 
     public WorkflowStep withFailure(String error, List<String> newUsedTools, List<String> newUsedCapabilities, List<String> newArtifacts, int attempts) {
+        return withFailure(error, newUsedTools, newUsedCapabilities, newArtifacts, toolOutputs, attempts);
+    }
+
+    public WorkflowStep withFailure(
+            String error,
+            List<String> newUsedTools,
+            List<String> newUsedCapabilities,
+            List<String> newArtifacts,
+            List<String> newToolOutputs,
+            int attempts
+    ) {
         return new WorkflowStep(
                 agent,
                 description,
@@ -267,6 +309,7 @@ public class WorkflowStep {
                 newUsedTools,
                 newUsedCapabilities,
                 newArtifacts,
+                newToolOutputs,
                 parameterContext,
                 StepStatus.FAILED,
                 null,
@@ -286,6 +329,7 @@ public class WorkflowStep {
                 usedTools,
                 usedCapabilities,
                 artifacts,
+                toolOutputs,
                 parameterContext,
                 StepStatus.IN_PROGRESS,
                 null,

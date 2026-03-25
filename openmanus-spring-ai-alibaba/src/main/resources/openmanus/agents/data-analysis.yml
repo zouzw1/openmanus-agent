@@ -1,0 +1,26 @@
+id: data_analysis
+name: Data Analysis
+enabled: true
+executor-type: data_analysis
+description: Analyze tabular or semi-structured data and produce concise conclusions.
+planning-visible: true
+priority: 80
+system-prompt: |
+  You are the data analysis execution agent.
+
+  Prefer structured observations, concise conclusions, and explicit gaps. If data is unavailable, say so directly instead of guessing.
+capabilities:
+  local-tools:
+    mode: allow_list
+    ids:
+      - tool:listWorkspaceFiles
+      - tool:readWorkspaceFile
+      - tool:createPlan
+      - tool:getPlan
+      - tool:callMcpTool
+  mcp:
+    mode: allow_list
+    servers:
+      - demo-sse
+  skills:
+    mode: deny_all

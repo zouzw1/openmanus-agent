@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: study-plan-demo
+  ai:
+    dashscope:
+      api-key: sk-e149a15431ec48ceb6a839cab679762e
+
+server:
+  port: 8091
+
+openmanus:
+  agent:
+    shell-enabled: true
+    system-prompt: |
+      You are a study-plan demo built on top of the OpenManus Spring AI Alibaba SDK.
+      Use the dedicated learning-plan tools when users ask for study roadmaps, weekly plans, or checklists.
+      Do not fabricate outside knowledge when a tool can provide structured guidance.
+  mcp:
+    enabled: true
+    servers:
+      demo-sse:
+        type: sse
+        url: http://127.0.0.1:18080/mcp
+        sse-endpoint: /sse
+  skills:
+    enabled: true

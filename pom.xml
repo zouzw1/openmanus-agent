@@ -37,5 +37,6 @@
     <modules>
         <module>openmanus-spring-ai-alibaba</module>
         <module>mcp-test-service</module>
+        <module>study-plan-demo</module>
     </modules>
 </project>

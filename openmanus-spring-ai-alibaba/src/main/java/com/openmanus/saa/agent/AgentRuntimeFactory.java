@@ -43,14 +43,15 @@ public class AgentRuntimeFactory {
     }
 
     public ResolvedAgentRuntime resolve(AgentDefinition agentDefinition) {
-        return resolve(agentDefinition, null, null, null, null);
+        return resolve(agentDefinition, null, null, null, null, null);
     }
 
     public ResolvedAgentRuntime resolveForStep(
             AgentDefinition agentDefinition,
             WorkflowStep step,
             List<String> toolInvocations,
-            List<String> toolInvocationDetails
+            List<String> toolInvocationDetails,
+            List<String> toolOutputs
     ) {
         Collection<String> stepToolNames = step == null ? null : step.getRequiredTools();
         Set<String> allowedStepTools = stepToolNames == null
@@ -59,7 +60,7 @@ public class AgentRuntimeFactory {
                         .filter(name -> name != null && !name.isBlank())
                         .collect(Collectors.toCollection(LinkedHashSet::new));
         String declaredSkillName = extractDeclaredSkillName(step);
-        return resolve(agentDefinition, allowedStepTools, declaredSkillName, toolInvocations, toolInvocationDetails);
+        return resolve(agentDefinition, allowedStepTools, declaredSkillName, toolInvocations, toolInvocationDetails, toolOutputs);
     }
 
     private ResolvedAgentRuntime resolve(
@@ -67,7 +68,8 @@ public class AgentRuntimeFactory {
             Set<String> stepToolNames,
             String declaredSkillName,
             List<String> toolInvocations,
-            List<String> toolInvocationDetails
+            List<String> toolInvocationDetails,
+            List<String> toolOutputs
     ) {
         Set<String> knownLocalToolNames = toolRegistryService.getEnabledTools().stream()
                 .map(ToolMetadata::getName)
@@ -101,7 +103,7 @@ public class AgentRuntimeFactory {
         }
         if (toolInvocations != null) {
             callbacks = callbacks.stream()
-                    .map(callback -> (ToolCallback) new TrackingToolCallback(callback, toolInvocations, toolInvocationDetails))
+                    .map(callback -> (ToolCallback) new TrackingToolCallback(callback, toolInvocations, toolInvocationDetails, toolOutputs))
                     .toList();
         }
 

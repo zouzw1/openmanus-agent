@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.model.AgentCapabilitySnapshot;
+import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.PlanResponse;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.SkillInfoResponse;
@@ -108,12 +109,25 @@ public class PlanningService {
     }
 
     public List<WorkflowStep> createWorkflowPlan(String objective, List<AgentCapabilitySnapshot> agentSnapshots) {
-        DraftPlan draftPlan = createWorkflowDraft(objective, agentSnapshots);
+        return createWorkflowPlan(objective, agentSnapshots, null);
+    }
+
+    public List<WorkflowStep> createWorkflowPlan(
+            String objective,
+            List<AgentCapabilitySnapshot> agentSnapshots,
+            IntentResolution intentResolution
+    ) {
+        validateObjectiveCapabilitySupportOrThrow(objective, agentSnapshots);
+        DraftPlan draftPlan = createWorkflowDraft(objective, agentSnapshots, intentResolution);
         draftPlan.lintWarnings().forEach(warning -> log.warn("Workflow draft lint: {}", warning));
         return compileWorkflowPlan(objective, draftPlan.steps(), agentSnapshots);
     }
 
-    private DraftPlan createWorkflowDraft(String objective, List<AgentCapabilitySnapshot> agentSnapshots) {
+    private DraftPlan createWorkflowDraft(
+            String objective,
+            List<AgentCapabilitySnapshot> agentSnapshots,
+            IntentResolution intentResolution
+    ) {
         String toolsSchema = buildPlanningToolGuidance();
         String languageDirective = ResponseLanguageHelper.responseDirective(objective);
         String availableAgents = buildAgentCapabilityPrompt(agentSnapshots);
@@ -121,6 +135,7 @@ public class PlanningService {
                 .map(AgentCapabilitySnapshot::agentId)
                 .filter(agentId -> agentId != null && !agentId.isBlank())
                 .collect(Collectors.toSet());
+        String intentContext = buildIntentPlanningContext(intentResolution);
 
         String content = chatClient.prompt()
                 .system("""
@@ -137,6 +152,9 @@ public class PlanningService {
                         Available agents:
                         %s
 
+                        Intent context:
+                        %s
+
                         AVAILABLE TOOLS AND THEIR SCHEMAS:
                         %s
 
@@ -151,18 +169,21 @@ public class PlanningService {
                         8. If information is missing, describe the missing information in plain language.
                         9. When the task explicitly asks for a formatted Word, PDF, PPTX, or similar deliverable and an appropriate skill is available, prefer a step that uses that skill instead of a plain text file write.
                         10. Separate collection, composition, and export work into different steps when the final deliverable requires transformation.
-                        11. Before any export/render/convert step for a non-text deliverable, include an earlier step that composes the source content or writes a draft artifact.
-                        12. Do not use export/render skills such as docx/pdf/pptx to invent the underlying content plan; use a drafting/composition step first.
+                         11. Before any export/render/convert step for a non-text deliverable, include an earlier step that composes the source content or writes a draft artifact.
+                         12. Do not use export/render skills such as docx/pdf/pptx to invent the underlying content plan; use a drafting/composition step first.
+                         13. Only add a final export or file-writing delivery step when the user explicitly requests a file/document/export/save-to-workspace result or a specific output format.
+                         14. Only reference tools, MCP tools, and skills that are explicitly available in the capability list and tool guidance above.
+                         15. Never propose a fake office deliverable such as writing plain text into a .docx/.pdf/.pptx file when the required export capability is unavailable.
 
-                        Return JSON only as an array.
-                        Each item must follow this schema:
+                         Return JSON only as an array.
+                         Each item must follow this schema:
                         {
                           "agent": "manus",
                           "description": "use the appropriate tool to retrieve the required data"
                         }
 
                         %s
-                        """.formatted(availableAgents, toolsSchema, languageDirective))
+                        """.formatted(availableAgents, intentContext, toolsSchema, languageDirective))
                 .user("""
                         Task: %s
 
@@ -175,6 +196,29 @@ public class PlanningService {
         List<WorkflowStep> parsedSteps = parseWorkflowPlan(content, allowedAgents);
         List<WorkflowStep> sanitizedSteps = sanitizeWorkflowSteps(parsedSteps, allowedAgents);
         return new DraftPlan(sanitizedSteps, lintWorkflowDraft(parsedSteps, sanitizedSteps));
+    }
+
+    private String buildIntentPlanningContext(IntentResolution intentResolution) {
+        if (intentResolution == null) {
+            return "- No explicit intent context was provided. Use only the user objective.";
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append("- intentId: ").append(intentResolution.intentId()).append("\n")
+                .append("- routeMode: ").append(intentResolution.routeMode()).append("\n")
+                .append("- preferredAgentId: ").append(intentResolution.preferredAgentId() == null ? "none" : intentResolution.preferredAgentId()).append("\n");
+        if (intentResolution.attributes() != null && !intentResolution.attributes().isEmpty()) {
+            builder.append("- attributes: ").append(intentResolution.attributes()).append("\n");
+        }
+        if (intentResolution.planningHints() != null && !intentResolution.planningHints().isEmpty()) {
+            builder.append("- planningHints:\n");
+            for (String planningHint : intentResolution.planningHints()) {
+                builder.append("  - ").append(planningHint).append("\n");
+            }
+        } else {
+            builder.append("- planningHints: none\n");
+        }
+        builder.append("- Treat preferredAgentId and planningHints as strong routing hints when they match the available capabilities.");
+        return builder.toString().trim();
     }
 
     private List<WorkflowStep> compileWorkflowPlan(
@@ -228,16 +272,12 @@ public class PlanningService {
         if (validation.isValidateRequestedDeliverable()
                 && requestedDeliverableFormat != null
                 && !requestedDeliverableFormat.isBlank()) {
-            boolean environmentSupportsDeliverable = skillCapabilityService.listAvailableCapabilities().stream()
-                    .anyMatch(capability -> capability.outputFormats().contains(requestedDeliverableFormat));
+            boolean environmentSupportsDeliverable = environmentSupportsDeliverable(requestedDeliverableFormat, agentSnapshots);
             boolean planContainsDeliverableProducer = workflowSteps.stream()
-                    .map(this::declaredSkillName)
-                    .filter(Objects::nonNull)
-                    .anyMatch(skillName -> supportedOutputFormatsForSkill(skillName).contains(requestedDeliverableFormat));
+                    .anyMatch(step -> stepCanProduceDeliverable(step, requestedDeliverableFormat));
 
             if (!environmentSupportsDeliverable) {
-                errors.add("The objective requests a ." + requestedDeliverableFormat
-                        + " deliverable, but the current environment has no skill that can produce this format.");
+                errors.add(buildUnsupportedDeliverableMessage(objective, requestedDeliverableFormat, agentSnapshots));
             } else if (!planContainsDeliverableProducer) {
                 errors.add("The objective requests a ." + requestedDeliverableFormat
                         + " deliverable, but the generated workflow contains no step with a skill that can produce this format.");
@@ -490,6 +530,7 @@ public class PlanningService {
                 hasDraftProducer = true;
             }
         }
+        trimUnrequestedTerminalDeliverySteps(objective, normalizedSteps);
         return normalizedSteps;
     }
 
@@ -1138,6 +1179,39 @@ public class PlanningService {
         return "md".equals(format) || "txt".equals(format) || "html".equals(format);
     }
 
+    private boolean isTerminalDeliveryStep(WorkflowStep step) {
+        if (step == null) {
+            return false;
+        }
+        if (isExportTransformStep(step)) {
+            return true;
+        }
+        return isPureWorkspaceWriteStep(step);
+    }
+
+    private boolean isPureWorkspaceWriteStep(WorkflowStep step) {
+        if (step == null) {
+            return false;
+        }
+        if ("project-planning".equals(declaredSkillName(step))) {
+            return false;
+        }
+        List<String> requiredTools = step.requiredTools() == null ? List.of() : step.requiredTools();
+        return requiredTools.contains("writeWorkspaceFile")
+                && !requiredTools.contains("createPlan")
+                && !requiredTools.contains("callMcpTool")
+                && declaredSkillName(step) == null;
+    }
+
+    private void trimUnrequestedTerminalDeliverySteps(String objective, List<WorkflowStep> steps) {
+        if (steps == null || steps.isEmpty() || explicitlyRequestsFileDeliverable(objective)) {
+            return;
+        }
+        while (!steps.isEmpty() && isTerminalDeliveryStep(steps.get(steps.size() - 1))) {
+            steps.remove(steps.size() - 1);
+        }
+    }
+
     private WorkflowStep buildDraftPreparationStep(
             String objective,
             WorkflowStep exportStep,
@@ -1201,6 +1275,46 @@ public class PlanningService {
 
     private String inferRequestedDeliverableFormat(String text) {
         return inferFormatFromText(text);
+    }
+
+    private void validateObjectiveCapabilitySupportOrThrow(String objective, List<AgentCapabilitySnapshot> agentSnapshots) {
+        String requestedDeliverableFormat = inferRequestedDeliverableFormat(objective);
+        if (requestedDeliverableFormat == null || requestedDeliverableFormat.isBlank()) {
+            return;
+        }
+        if (environmentSupportsDeliverable(requestedDeliverableFormat, agentSnapshots)) {
+            return;
+        }
+        throw new PlanValidationException(
+                buildUnsupportedDeliverableMessage(objective, requestedDeliverableFormat, agentSnapshots),
+                List.of()
+        );
+    }
+
+    private boolean explicitlyRequestsFileDeliverable(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String normalized = text.toLowerCase();
+        if (inferRequestedDeliverableFormat(normalized) != null) {
+            return true;
+        }
+        return mentionsAny(
+                normalized,
+                "export",
+                "save",
+                "write file",
+                "workspace",
+                "document",
+                "file",
+                "deliverable",
+                "导出",
+                "保存",
+                "写入文件",
+                "文件",
+                "文档",
+                "工作区"
+        );
     }
 
     private String inferStepTargetFormat(WorkflowStep step) {
@@ -1276,6 +1390,79 @@ public class PlanningService {
         return skillCapabilityService.getCapability(skillName)
                 .map(capability -> Set.copyOf(capability.outputFormats()))
                 .orElse(Set.of());
+    }
+
+    private boolean environmentSupportsDeliverable(String format, List<AgentCapabilitySnapshot> agentSnapshots) {
+        if (format == null || format.isBlank()) {
+            return true;
+        }
+        if (isTextDraftFormat(format)) {
+            return agentSnapshots != null && agentSnapshots.stream().anyMatch(snapshot -> snapshot.hasLocalTool("writeWorkspaceFile"));
+        }
+        return skillCapabilityService.listAvailableCapabilities().stream()
+                .anyMatch(capability -> capability.outputFormats().contains(format));
+    }
+
+    private boolean stepCanProduceDeliverable(WorkflowStep step, String requestedDeliverableFormat) {
+        if (step == null || requestedDeliverableFormat == null || requestedDeliverableFormat.isBlank()) {
+            return false;
+        }
+        if (isTextDraftFormat(requestedDeliverableFormat)) {
+            List<String> requiredTools = step.requiredTools() == null ? List.of() : step.requiredTools();
+            return requiredTools.contains("writeWorkspaceFile")
+                    && requestedDeliverableFormat.equals(inferStepTargetFormat(step));
+        }
+        String skillName = declaredSkillName(step);
+        return skillName != null && supportedOutputFormatsForSkill(skillName).contains(requestedDeliverableFormat);
+    }
+
+    private String buildUnsupportedDeliverableMessage(
+            String objective,
+            String requestedDeliverableFormat,
+            List<AgentCapabilitySnapshot> agentSnapshots
+    ) {
+        String formatLabel = formatDisplayName(requestedDeliverableFormat);
+        String fallbackSuggestion = fallbackSuggestion(objective, requestedDeliverableFormat, agentSnapshots);
+        return ResponseLanguageHelper.choose(
+                objective,
+                "当前环境暂不支持直接输出 " + formatLabel + " 文件，因此本次无法继续执行。"
+                        + (fallbackSuggestion == null ? "" : "\n\n" + fallbackSuggestion),
+                "The current environment does not support direct " + formatLabel + " output, so this request cannot continue as-is."
+                        + (fallbackSuggestion == null ? "" : "\n\n" + fallbackSuggestion)
+        );
+    }
+
+    private String fallbackSuggestion(String objective, String requestedDeliverableFormat, List<AgentCapabilitySnapshot> agentSnapshots) {
+        boolean chinese = ResponseLanguageHelper.detect(objective) == ResponseLanguageHelper.Language.ZH_CN;
+        if (isTextDraftFormat(requestedDeliverableFormat)) {
+            return chinese
+                    ? "建议检查当前 agent 是否允许使用 writeWorkspaceFile，或改为直接聊天输出。"
+                    : "Consider enabling writeWorkspaceFile for a planning-visible agent, or request a direct chat response instead.";
+        }
+        boolean canWriteText = environmentSupportsDeliverable("md", agentSnapshots);
+        if (canWriteText) {
+            return chinese
+                    ? "你可以改为输出 Markdown 或纯文本版本；如果需要 Word，请先启用对应的 docx 导出能力后再试。"
+                    : "You can request Markdown or plain text output instead. If you need Word output, enable the corresponding docx export capability and try again.";
+        }
+        return chinese
+                ? "如需继续，请先启用对应的导出能力，或改为当前环境支持的输出格式。"
+                : "To continue, enable the required export capability first or switch to an output format supported by the current environment.";
+    }
+
+    private String formatDisplayName(String format) {
+        if (format == null || format.isBlank()) {
+            return "requested";
+        }
+        return switch (format) {
+            case "docx" -> "Word (.docx)";
+            case "pdf" -> "PDF";
+            case "pptx" -> "PowerPoint (.pptx)";
+            case "md" -> "Markdown";
+            case "txt" -> "plain text";
+            case "html" -> "HTML";
+            default -> "." + format;
+        };
     }
 
     private List<String> listAvailableSkillNames() {

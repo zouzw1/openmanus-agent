@@ -3,24 +3,29 @@ package com.openmanus.saa.agent;
 import com.openmanus.saa.config.AgentRegistryProperties;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AgentRegistryService implements SmartInitializingSingleton {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentRegistryService.class);
+
     private final AgentRegistryProperties properties;
-    private final AgentConfigSource agentConfigSource;
+    private final List<AgentConfigSource> agentConfigSources;
     private final AtomicReference<Map<String, AgentDefinition>> definitionsRef = new AtomicReference<>(Map.of());
 
-    public AgentRegistryService(AgentRegistryProperties properties, AgentConfigSource agentConfigSource) {
+    public AgentRegistryService(AgentRegistryProperties properties, List<AgentConfigSource> agentConfigSources) {
         this.properties = properties;
-        this.agentConfigSource = agentConfigSource;
+        this.agentConfigSources = agentConfigSources == null ? List.of() : List.copyOf(agentConfigSources);
     }
 
     @Override
@@ -29,16 +34,34 @@ public class AgentRegistryService implements SmartInitializingSingleton {
     }
 
     public synchronized List<AgentDefinition> reload() {
-        List<AgentDefinition> loadedDefinitions = agentConfigSource.loadAll();
+        List<AgentDefinition> loadedDefinitions = loadAllDefinitions();
         Map<String, AgentDefinition> next = new LinkedHashMap<>();
         for (AgentDefinition definition : loadedDefinitions) {
             if (next.containsKey(definition.getId())) {
-                throw new IllegalStateException("Duplicate agent id found while loading local registry: " + definition.getId());
+                log.info("Overriding previously loaded agent definition for id '{}' with a later source entry.", definition.getId());
             }
             next.put(definition.getId(), definition);
         }
         definitionsRef.set(Map.copyOf(next));
         return listAll();
+    }
+
+    private List<AgentDefinition> loadAllDefinitions() {
+        if (agentConfigSources.isEmpty()) {
+            return List.of();
+        }
+        List<AgentDefinition> aggregated = new ArrayList<>();
+        for (AgentConfigSource source : agentConfigSources) {
+            if (source == null) {
+                continue;
+            }
+            List<AgentDefinition> loaded = source.loadAll();
+            if (loaded == null || loaded.isEmpty()) {
+                continue;
+            }
+            aggregated.addAll(new ArrayList<>(new LinkedHashSet<>(loaded)));
+        }
+        return List.copyOf(aggregated);
     }
 
     public List<AgentDefinition> listAll() {

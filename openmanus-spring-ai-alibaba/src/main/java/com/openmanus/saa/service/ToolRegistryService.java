@@ -34,7 +34,6 @@ import org.springframework.util.ReflectionUtils;
 public class ToolRegistryService implements SmartInitializingSingleton {
 
     private static final Logger log = LoggerFactory.getLogger(ToolRegistryService.class);
-    private static final String TOOL_PACKAGE_PREFIX = "com.openmanus.saa.tool";
 
     private final ApplicationContext applicationContext;
     private final OpenManusProperties openManusProperties;
@@ -189,9 +188,7 @@ public class ToolRegistryService implements SmartInitializingSingleton {
 
     private boolean isToolBean(Object bean) {
         Class<?> targetClass = AopUtils.getTargetClass(bean);
-        return targetClass != null
-                && targetClass.getPackageName() != null
-                && targetClass.getPackageName().startsWith(TOOL_PACKAGE_PREFIX);
+        return targetClass != null && hasToolMethods(targetClass);
     }
 
     private void registerToolsFromClass(Class<?> toolClass) {
@@ -200,6 +197,16 @@ public class ToolRegistryService implements SmartInitializingSingleton {
                 method -> registerTool(buildMetadata(method)),
                 method -> method.isAnnotationPresent(Tool.class) && !method.isSynthetic() && !method.isBridge()
         );
+    }
+
+    private boolean hasToolMethods(Class<?> toolClass) {
+        final boolean[] found = {false};
+        ReflectionUtils.doWithMethods(
+                toolClass,
+                method -> found[0] = true,
+                method -> method.isAnnotationPresent(Tool.class) && !method.isSynthetic() && !method.isBridge()
+        );
+        return found[0];
     }
 
     private ToolMetadata buildMetadata(Method method) {

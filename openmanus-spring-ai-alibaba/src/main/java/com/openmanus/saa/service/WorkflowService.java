@@ -10,6 +10,7 @@ import com.openmanus.saa.model.AgentCapabilitySnapshot;
 import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
 import com.openmanus.saa.model.InferencePolicy;
+import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.StepStatus;
 import com.openmanus.saa.model.WorkflowExecutionResponse;
@@ -19,7 +20,10 @@ import com.openmanus.saa.model.WorkflowSummary;
 import com.openmanus.saa.model.session.SessionState;
 import com.openmanus.saa.service.agent.AgentExecutionResult;
 import com.openmanus.saa.service.agent.SpecialistAgent;
+import com.openmanus.saa.service.intent.IntentResolutionService;
 import com.openmanus.saa.service.session.SessionMemoryService;
+import com.openmanus.saa.service.summary.WorkflowSummaryContext;
+import com.openmanus.saa.service.summary.WorkflowSummaryFormatter;
 import com.openmanus.saa.tool.PlanningTools;
 import com.openmanus.saa.util.ParameterMissingDetector;
 import com.openmanus.saa.util.ResponseLanguageHelper;
@@ -40,6 +44,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -48,6 +53,7 @@ public class WorkflowService {
     private static final Logger log = LoggerFactory.getLogger(WorkflowService.class);
     private static final String STEP_OUTCOME_START = "<STEP_OUTCOME_JSON>";
     private static final String STEP_OUTCOME_END = "</STEP_OUTCOME_JSON>";
+    private static final int CONTEXT_TEXT_LIMIT = 2400;
 
     private final ChatClient chatClient;
     private final PlanningService planningService;
@@ -59,6 +65,8 @@ public class WorkflowService {
     private final SkillsService skillsService;
     private final SkillCapabilityService skillCapabilityService;
     private final AgentCapabilitySnapshotService agentCapabilitySnapshotService;
+    private final IntentResolutionService intentResolutionService;
+    private final List<WorkflowSummaryFormatter> workflowSummaryFormatters;
     private final Path workspaceRoot;
     private final ObjectMapper objectMapper;
 
@@ -72,7 +80,9 @@ public class WorkflowService {
             AgentRegistryService agentRegistryService,
             SkillsService skillsService,
             SkillCapabilityService skillCapabilityService,
-            AgentCapabilitySnapshotService agentCapabilitySnapshotService
+            AgentCapabilitySnapshotService agentCapabilitySnapshotService,
+            IntentResolutionService intentResolutionService,
+            List<WorkflowSummaryFormatter> workflowSummaryFormatters
     ) {
         this.chatClient = chatClient;
         this.planningService = planningService;
@@ -83,6 +93,12 @@ public class WorkflowService {
         this.skillsService = skillsService;
         this.skillCapabilityService = skillCapabilityService;
         this.agentCapabilitySnapshotService = agentCapabilitySnapshotService;
+        this.intentResolutionService = intentResolutionService;
+        List<WorkflowSummaryFormatter> orderedFormatters = workflowSummaryFormatters == null
+                ? new ArrayList<>()
+                : new ArrayList<>(workflowSummaryFormatters);
+        AnnotationAwareOrderComparator.sort(orderedFormatters);
+        this.workflowSummaryFormatters = List.copyOf(orderedFormatters);
         this.workspaceRoot = Paths.get(properties.getWorkspace()).toAbsolutePath().normalize();
         this.objectMapper = new ObjectMapper();
         this.agentExecutors = new LinkedHashMap<>();
@@ -92,6 +108,10 @@ public class WorkflowService {
     }
 
     public WorkflowExecutionResponse execute(String sessionId, String objective) {
+        return execute(sessionId, objective, null);
+    }
+
+    public WorkflowExecutionResponse execute(String sessionId, String objective, IntentResolution providedIntentResolution) {
         SessionState session = sessionMemoryService.getOrCreate(sessionId);
         String resolvedSessionId = session.getSessionId();
 
@@ -105,12 +125,20 @@ public class WorkflowService {
             );
         }
 
+        IntentResolution intentResolution = providedIntentResolution == null
+                ? intentResolutionService.resolve(objective, session)
+                : providedIntentResolution;
+        session.addExecutionLog("Intent resolved: " + intentResolution.intentId() + " -> " + intentResolution.routeMode());
         session.addMessage("user", objective);
-        return executeNewPlan(resolvedSessionId, objective);
+        return executeNewPlan(resolvedSessionId, objective, intentResolution);
     }
 
     public AgentResponse executeAsAgentResponse(String sessionId, String objective) {
         return toAgentResponse(execute(sessionId, objective));
+    }
+
+    public AgentResponse executeAsAgentResponse(String sessionId, String objective, IntentResolution intentResolution) {
+        return toAgentResponse(execute(sessionId, objective, intentResolution));
     }
 
     public Optional<HumanFeedbackRequest> getPendingFeedback(String sessionId) {
@@ -134,7 +162,7 @@ public class WorkflowService {
                     pendingFeedback.getObjective(),
                     updatedObjective
             );
-            return executeNewPlan(sessionId, updatedObjective);
+            return executeNewPlan(sessionId, updatedObjective, null);
         }
 
         return switch (feedback.getAction()) {
@@ -154,12 +182,12 @@ public class WorkflowService {
         return toAgentResponse(submitHumanFeedback(sessionId, feedback));
     }
 
-    private WorkflowExecutionResponse executeNewPlan(String sessionId, String objective) {
+    private WorkflowExecutionResponse executeNewPlan(String sessionId, String objective, IntentResolution intentResolution) {
         List<WorkflowStep> steps;
         List<AgentCapabilitySnapshot> agentSnapshots = agentCapabilitySnapshotService
                 .listPlanningVisibleSnapshots(properties.isWorkflowUseDataAnalysisAgent());
         try {
-            steps = planningService.createWorkflowPlan(objective, agentSnapshots);
+            steps = planningService.createWorkflowPlan(objective, agentSnapshots, intentResolution);
         } catch (PlanningService.PlanValidationException ex) {
             log.warn("Workflow planning failed validation for session {}: {}", sessionId, ex.getMessage());
             return createPlanningFailureResponse(objective, ex.getMessage(), ex.getPlannedSteps());
@@ -192,7 +220,18 @@ public class WorkflowService {
         }
 
         List<String> executionLog = toExecutionLog(executedSteps);
-        String userMessage = summarizeWorkflow(objective, planningTools.getPlan(planId), executionLog);
+        List<String> responseArtifacts = collectResponseArtifacts(executedSteps);
+        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+                objective,
+                WorkflowExecutionStatus.COMPLETED,
+                null,
+                summarizeWorkflow(objective, executedSteps, responseArtifacts),
+                null,
+                null,
+                executedSteps,
+                responseArtifacts,
+                executionLog
+        ));
         WorkflowSummary summary = buildSummary(
                 objective,
                 executedSteps,
@@ -204,7 +243,7 @@ public class WorkflowService {
         SessionState session = sessionMemoryService.getOrCreate(sessionId);
         session.addMessage("assistant", summary.userMessage());
 
-        return new WorkflowExecutionResponse(objective, executedSteps, collectResponseArtifacts(executedSteps), executionLog, summary);
+        return new WorkflowExecutionResponse(objective, executedSteps, responseArtifacts, executionLog, summary);
     }
 
     private WorkflowExecutionResponse createPlanningFailureResponse(
@@ -264,7 +303,18 @@ public class WorkflowService {
         }
 
         List<String> executionLog = toExecutionLog(allSteps);
-        String userMessage = summarizeWorkflow(objective, planningTools.getPlan(planId), executionLog);
+        List<String> responseArtifacts = collectResponseArtifacts(allSteps);
+        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+                objective,
+                WorkflowExecutionStatus.COMPLETED,
+                null,
+                summarizeWorkflow(objective, allSteps, responseArtifacts),
+                null,
+                null,
+                allSteps,
+                responseArtifacts,
+                executionLog
+        ));
         WorkflowSummary summary = buildSummary(
                 objective,
                 allSteps,
@@ -276,7 +326,7 @@ public class WorkflowService {
         SessionState session = sessionMemoryService.getOrCreate(sessionId);
         session.addMessage("assistant", summary.userMessage());
 
-        return new WorkflowExecutionResponse(objective, allSteps, collectResponseArtifacts(allSteps), executionLog, summary);
+        return new WorkflowExecutionResponse(objective, allSteps, responseArtifacts, executionLog, summary);
     }
 
     private WorkflowExecutionResponse skipCurrentStep(String sessionId, HumanFeedbackRequest pendingFeedback) {
@@ -320,7 +370,7 @@ public class WorkflowService {
     private WorkflowExecutionResponse abortPlan(String sessionId, HumanFeedbackRequest pendingFeedback) {
         List<WorkflowStep> allSteps = resolveWorkflowSteps(pendingFeedback);
         List<String> executionLog = toExecutionLog(allSteps);
-        String userMessage = ResponseLanguageHelper.choose(
+        String baseMessage = ResponseLanguageHelper.choose(
                 pendingFeedback.getObjective(),
                 String.format(
                         "\u5de5\u4f5c\u6d41\u5df2\u6839\u636e\u7528\u6237\u53cd\u9988\u7ec8\u6b62\u3002%n%n\u8ba1\u5212ID: %s%n\u5f53\u524d\u6b65\u9aa4: %s%n\u539f\u56e0: %s",
@@ -335,6 +385,17 @@ public class WorkflowService {
                         pendingFeedback.getErrorMessage()
                 )
         );
+        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+                pendingFeedback.getObjective(),
+                WorkflowExecutionStatus.ABORTED,
+                pendingFeedback.getFailedStep().getDescription(),
+                baseMessage,
+                pendingFeedback.getFailedStep(),
+                null,
+                allSteps,
+                collectResponseArtifacts(allSteps),
+                executionLog
+        ));
         WorkflowSummary summary = buildSummary(
                 pendingFeedback.getObjective(),
                 allSteps,
@@ -368,12 +429,14 @@ public class WorkflowService {
             }
             log.info("Executing step {}: {}", actualStepIndex + 1, step.getDescription());
 
+            Map<String, Object> executionParameterContext = resolveExecutionParameterContext(updatedSteps, actualStepIndex, step);
+
             WorkflowStep inProgressStep = new WorkflowStep(
                     step.getAgent(),
                     step.getDescription(),
                     step.getRequiredTools(),
                     step.getUsedTools(),
-                    step.getParameterContext(),
+                    executionParameterContext,
                     StepStatus.IN_PROGRESS,
                     null,
                     LocalDateTime.now(),
@@ -400,11 +463,23 @@ public class WorkflowService {
             List<String> displayUsedTools = buildDisplayUsedTools(executionResult.usedTools, executionResult.usedToolCalls);
             List<String> resolvedArtifacts = resolveStepArtifacts(inProgressStep, executionResult.usedToolCalls, executionResult.artifacts);
             if (executionResult.success) {
-                completedStep = inProgressStep.withResult(executionResult.result, executionResult.usedTools, displayUsedTools, resolvedArtifacts);
+                completedStep = inProgressStep.withResult(
+                        executionResult.result,
+                        executionResult.usedTools,
+                        displayUsedTools,
+                        resolvedArtifacts,
+                        executionResult.toolOutputs
+                );
                 updatedSteps.set(actualStepIndex, completedStep);
                 log.info("Step {} completed successfully", actualStepIndex + 1);
             } else if (executionResult.needsHumanFeedback) {
-                completedStep = inProgressStep.withHumanFeedbackNeeded(executionResult.error, executionResult.usedTools, displayUsedTools, resolvedArtifacts);
+                completedStep = inProgressStep.withHumanFeedbackNeeded(
+                        executionResult.error,
+                        executionResult.usedTools,
+                        displayUsedTools,
+                        resolvedArtifacts,
+                        executionResult.toolOutputs
+                );
                 updatedSteps.set(actualStepIndex, completedStep);
                 HumanFeedbackRequest feedbackRequest = createHumanFeedbackRequest(
                         sessionId,
@@ -424,6 +499,7 @@ public class WorkflowService {
                         executionResult.usedTools,
                         displayUsedTools,
                         resolvedArtifacts,
+                        executionResult.toolOutputs,
                         executionResult.attempts
                 );
                 updatedSteps.set(actualStepIndex, completedStep);
@@ -451,6 +527,7 @@ public class WorkflowService {
         String result = null;
         List<String> usedTools = List.of();
         List<String> usedToolCalls = List.of();
+        List<String> toolOutputs = List.of();
         String error = null;
         InferencePolicy inferencePolicy = resolveLatestInferencePolicy(sessionMemoryService.getOrCreate(sessionId));
 
@@ -461,7 +538,7 @@ public class WorkflowService {
             try {
                 SkillLoadResult skillLoadResult = loadDeclaredSkill(step);
                 if (skillLoadResult.error != null) {
-                    return new ExecutionResult(false, null, skillLoadResult.usedTools, skillLoadResult.usedToolCalls, List.of(), false, skillLoadResult.error, attempt);
+                    return new ExecutionResult(false, null, skillLoadResult.usedTools, skillLoadResult.usedToolCalls, List.of(), List.of(), false, skillLoadResult.error, attempt);
                 }
 
                 AgentExecutionResult execution = agent.execute(
@@ -474,13 +551,14 @@ public class WorkflowService {
                 result = execution.content();
                 usedTools = mergeToolNames(skillLoadResult.usedTools, execution.usedTools());
                 usedToolCalls = mergeToolCalls(skillLoadResult.usedToolCalls, execution.usedToolCalls());
+                toolOutputs = execution.toolOutputs();
                 ParsedStepOutcome parsedOutcome = parseStepOutcome(result);
                 String skillValidationError = validateRequiredSkillExecution(step, usedTools, usedToolCalls);
                 if (skillValidationError != null) {
                     error = skillValidationError;
                     log.warn("Step {} did not execute required skill correctly: {}", stepIndex + 1, skillValidationError);
                     if (attempt >= maxAttempts) {
-                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), false, skillValidationError, attempt);
+                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, skillValidationError, attempt);
                     }
                     continue;
                 }
@@ -492,12 +570,12 @@ public class WorkflowService {
                         case SUCCESS -> {
                             String validationError = validateCompletedStep(step, usedTools, usedToolCalls, outcome);
                             if (validationError == null) {
-                                return new ExecutionResult(true, outcomeMessage, usedTools, usedToolCalls, outcome.artifacts(), false, null, attempt);
+                                return new ExecutionResult(true, outcomeMessage, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, null, attempt);
                             }
                             error = validationError;
                             log.warn("Step {} failed validation: {}", stepIndex + 1, validationError);
                             if (attempt >= maxAttempts) {
-                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), false, validationError, attempt);
+                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, validationError, attempt);
                             }
                             continue;
                         }
@@ -514,6 +592,7 @@ public class WorkflowService {
                                     usedTools,
                                     usedToolCalls,
                                     outcome.artifacts(),
+                                    toolOutputs,
                                     needsHumanFeedback,
                                     error,
                                     attempt
@@ -522,13 +601,13 @@ public class WorkflowService {
                         case RETRYABLE_ERROR -> {
                             error = formatOutcomeError(outcome, outcomeMessage);
                             if (attempt >= maxAttempts) {
-                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), false, error, attempt);
+                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, error, attempt);
                             }
                             continue;
                         }
                         case FAILED -> {
                             error = formatOutcomeError(outcome, outcomeMessage);
-                            return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), false, error, attempt);
+                            return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, error, attempt);
                         }
                     }
                 }
@@ -537,12 +616,12 @@ public class WorkflowService {
                 if (detection == ParameterMissingDetector.DetectionResult.SUCCESS) {
                     String validationError = validateCompletedStep(step, usedTools, usedToolCalls, null);
                     if (validationError == null) {
-                        return new ExecutionResult(true, result, usedTools, usedToolCalls, List.of(), false, null, attempt);
+                        return new ExecutionResult(true, result, usedTools, usedToolCalls, List.of(), toolOutputs, false, null, attempt);
                     }
                     error = validationError;
                     log.warn("Step {} failed validation: {}", stepIndex + 1, validationError);
                     if (attempt >= maxAttempts) {
-                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), false, validationError, attempt);
+                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, validationError, attempt);
                     }
                     continue;
                 }
@@ -560,7 +639,7 @@ public class WorkflowService {
                         String finalError = needsHumanFeedback
                                 ? error
                                 : buildInferenceExhaustedError(error, inferencePolicy);
-                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), needsHumanFeedback, finalError, attempt);
+                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, needsHumanFeedback, finalError, attempt);
                     }
                     continue;
                 }
@@ -570,7 +649,7 @@ public class WorkflowService {
                     continue;
                 }
 
-                return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), false, error, attempt);
+                return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
             } catch (Exception e) {
                 log.error("Step {} execution exception", stepIndex + 1, e);
                 error = e.getMessage();
@@ -578,12 +657,12 @@ public class WorkflowService {
                     continue;
                 }
                 if (attempt >= maxAttempts) {
-                    return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), false, error, attempt);
+                    return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
                 }
             }
         }
 
-        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), false, error, attempt);
+        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
     }
 
     private String buildStepExecutionPrompt(
@@ -1085,7 +1164,7 @@ public class WorkflowService {
                         .append(i + 1)
                         .append(" output: ")
                         .append(completedStep.getResult() == null ? "No recorded output" : completedStep.getResult())
-                        .append(formatStepArtifactsForContext(completedStep))
+                        .append(formatCompletedStepContext(completedStep))
                         .append("\n");
             }
         }
@@ -1108,15 +1187,49 @@ public class WorkflowService {
         return context.toString().trim();
     }
 
-    private String formatStepArtifactsForContext(WorkflowStep step) {
-        if (step == null || step.getParameterContext() == null || step.getParameterContext().isEmpty()) {
+    private Map<String, Object> resolveExecutionParameterContext(
+            List<WorkflowStep> workflowSteps,
+            int currentStepIndex,
+            WorkflowStep step
+    ) {
+        Map<String, Object> baseContext = step == null || step.getParameterContext() == null
+                ? Map.of()
+                : step.getParameterContext();
+        Map<String, Object> resolvedContext = new LinkedHashMap<>(baseContext);
+
+        String latestReusableText = resolveLatestReusableTextPayload(workflowSteps, currentStepIndex);
+        if (latestReusableText == null || latestReusableText.isBlank()) {
+            return resolvedContext;
+        }
+
+        boolean updated = false;
+        for (String parameterName : List.of("content", "text", "body", "markdown", "html")) {
+            Object value = resolvedContext.get(parameterName);
+            if (value instanceof String textValue && textValue.isBlank()) {
+                resolvedContext.put(parameterName, latestReusableText);
+                updated = true;
+            }
+        }
+        return updated ? resolvedContext : resolvedContext;
+    }
+
+    private String formatCompletedStepContext(WorkflowStep step) {
+        if (step == null) {
             return "";
         }
-        Object relativePathValue = step.getParameterContext().get("relativePath");
+
+        StringBuilder context = new StringBuilder();
+        Object relativePathValue = step.getParameterContext() == null ? null : step.getParameterContext().get("relativePath");
         if (relativePathValue instanceof String relativePath && !relativePath.isBlank()) {
-            return " (workspace artifact: " + relativePath + ")";
+            context.append(" (workspace artifact: ").append(relativePath).append(")");
         }
-        return "";
+
+        String reusableText = extractReusableTextPayload(step);
+        if (reusableText != null && !reusableText.isBlank()) {
+            context.append("\n  Reusable content:\n")
+                    .append(indentForExecutionContext(truncateForContext(reusableText, CONTEXT_TEXT_LIMIT), "    "));
+        }
+        return context.toString();
     }
 
     private InferencePolicy resolveLatestInferencePolicy(SessionState session) {
@@ -1538,12 +1651,23 @@ public class WorkflowService {
                         + "\u5982\u9700\u663e\u5f0f\u63a7\u5236\uff0c\u4ecd\u652f\u6301 action: PROVIDE_INFO, MODIFY_AND_RETRY, RETRY, SKIP_STEP, ABORT_PLAN"
                 : "You can submit natural-language feedback such as \"retry with corrected parameters\", \"skip this step\", or \"end the workflow\".\n"
                         + "Explicit action is still supported: PROVIDE_INFO, MODIFY_AND_RETRY, RETRY, SKIP_STEP, ABORT_PLAN");
+        String formattedMessage = formatSummaryMessage(new WorkflowSummaryContext(
+                objective,
+                WorkflowExecutionStatus.NEEDS_HUMAN_INTERVENTION,
+                pendingFeedback.getFailedStep().getDescription(),
+                userMessage.toString(),
+                pendingFeedback.getFailedStep(),
+                pendingFeedback,
+                executedSteps,
+                collectResponseArtifacts(executedSteps),
+                toExecutionLog(executedSteps)
+        ));
         WorkflowSummary summary = buildSummary(
                 objective,
                 executedSteps,
                 WorkflowExecutionStatus.NEEDS_HUMAN_INTERVENTION,
                 pendingFeedback.getFailedStep().getDescription(),
-                userMessage.toString()
+                formattedMessage
         );
 
         return new WorkflowExecutionResponse(
@@ -1561,7 +1685,9 @@ public class WorkflowService {
             List<WorkflowStep> executedSteps,
             WorkflowStep failedStep
     ) {
-        String userMessage = ResponseLanguageHelper.choose(
+        List<String> artifacts = collectResponseArtifacts(executedSteps);
+        List<String> executionLog = toExecutionLog(executedSteps);
+        String baseMessage = ResponseLanguageHelper.choose(
                 objective,
                 String.format(
                         "工作流执行失败。%n%n失败步骤: %s%n原因: %s",
@@ -1574,6 +1700,17 @@ public class WorkflowService {
                         failedStep.getErrorMessage()
                 )
         );
+        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+                objective,
+                WorkflowExecutionStatus.FAILED,
+                failedStep.getDescription(),
+                baseMessage,
+                failedStep,
+                null,
+                executedSteps,
+                artifacts,
+                executionLog
+        ));
         WorkflowSummary summary = buildSummary(
                 objective,
                 executedSteps,
@@ -1582,7 +1719,7 @@ public class WorkflowService {
                 userMessage
         );
 
-        return new WorkflowExecutionResponse(objective, executedSteps, collectResponseArtifacts(executedSteps), toExecutionLog(executedSteps), summary, null);
+        return new WorkflowExecutionResponse(objective, executedSteps, artifacts, executionLog, summary, null);
     }
 
     private AgentResponse toAgentResponse(WorkflowExecutionResponse response) {
@@ -1613,6 +1750,22 @@ public class WorkflowService {
                 response.summary(),
                 response.pendingFeedback()
         );
+    }
+
+    private String formatSummaryMessage(WorkflowSummaryContext context) {
+        if (context == null) {
+            return "";
+        }
+        for (WorkflowSummaryFormatter formatter : workflowSummaryFormatters) {
+            if (formatter == null || !formatter.supports(context)) {
+                continue;
+            }
+            String formatted = formatter.format(context);
+            if (formatted != null && !formatted.isBlank()) {
+                return formatted.trim();
+            }
+        }
+        return context.baseMessage() == null ? "" : context.baseMessage();
     }
 
     private WorkflowSummary buildSummary(
@@ -1881,41 +2034,175 @@ public class WorkflowService {
         return summary + "...";
     }
 
-    private String summarizeWorkflow(String objective, String currentPlan, List<String> executionLog) {
-        if (executionLog.isEmpty()) {
-            return ResponseLanguageHelper.choose(objective, "\u6682\u65e0\u6267\u884c\u8bb0\u5f55\u3002", "No execution log is available.");
+    private String summarizeWorkflow(String objective, List<WorkflowStep> steps, List<String> artifacts) {
+        if (artifacts != null && !artifacts.isEmpty()) {
+            return ResponseLanguageHelper.choose(
+                    objective,
+                    "已生成产物：\n- " + String.join("\n- ", artifacts),
+                    "Artifacts generated:\n- " + String.join("\n- ", artifacts)
+            );
         }
 
-        String languageDirective = ResponseLanguageHelper.responseDirective(objective);
-        return chatClient.prompt()
-                .system("""
-                        %s
+        String lastToolOutput = findLastMeaningfulToolOutput(steps);
+        if (lastToolOutput != null && !lastToolOutput.isBlank()) {
+            return lastToolOutput;
+        }
 
-                        You are responsible for summarizing workflow execution results.
+        if (steps != null) {
+            for (int i = steps.size() - 1; i >= 0; i--) {
+                WorkflowStep step = steps.get(i);
+                if (step == null || !step.isCompleted()) {
+                    continue;
+                }
+                String result = step.getResult();
+                if (result != null && !result.isBlank()) {
+                    return result.trim();
+                }
+            }
+        }
 
-                        IMPORTANT OUTPUT REQUIREMENTS:
-                        - Provide a concise final answer grounded in the execution log.
-                        - Mention the final deliverable, key completed steps, and any remaining gaps.
-                        - Do not invent actions or results that are not present in the log.
-                        - Keep the response brief and easy to scan.
-                        - Prefer 3-5 short bullets for list-shaped content. Do not repeat the full workflow plan.
+        return ResponseLanguageHelper.choose(objective, "\u6682\u65e0\u53ef\u5c55\u793a\u7684\u6700\u7ec8\u7ed3\u679c\u3002", "No final result is available.");
+    }
 
-                        %s
-                        """.formatted(properties.getSystemPrompt(), languageDirective))
-                .user("""
-                        Objective:
-                        %s
+    private String findLastMeaningfulToolOutput(List<WorkflowStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return null;
+        }
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            WorkflowStep step = steps.get(i);
+            if (step == null || !step.isCompleted() || step.getToolOutputs() == null || step.getToolOutputs().isEmpty()) {
+                continue;
+            }
+            for (int j = step.getToolOutputs().size() - 1; j >= 0; j--) {
+                String output = extractToolOutput(step.getToolOutputs().get(j));
+                if (output != null && !output.isBlank()) {
+                    return output;
+                }
+            }
+        }
+        return null;
+    }
 
-                        Workflow plan:
-                        %s
+    private String resolveLatestReusableTextPayload(List<WorkflowStep> workflowSteps, int currentStepIndex) {
+        if (workflowSteps == null || workflowSteps.isEmpty()) {
+            return null;
+        }
+        for (int i = Math.min(currentStepIndex - 1, workflowSteps.size() - 1); i >= 0; i--) {
+            WorkflowStep candidate = workflowSteps.get(i);
+            if (candidate == null || !candidate.isCompleted()) {
+                continue;
+            }
+            String payload = extractReusableTextPayload(candidate);
+            if (payload != null && !payload.isBlank()) {
+                return payload;
+            }
+        }
+        return null;
+    }
 
-                        Execution log:
-                        %s
+    private String extractReusableTextPayload(WorkflowStep step) {
+        if (step == null) {
+            return null;
+        }
 
-                        Please provide a brief final summary.
-                        """.formatted(objective, currentPlan, String.join("\n\n", executionLog)))
-                .call()
-                .content();
+        if (step.getToolOutputs() != null) {
+            for (int i = step.getToolOutputs().size() - 1; i >= 0; i--) {
+                String payload = extractReusableTextPayload(step.getToolOutputs().get(i));
+                if (payload != null && !payload.isBlank()) {
+                    return payload;
+                }
+            }
+        }
+
+        if (step.getResult() != null && !step.getResult().isBlank()) {
+            return step.getResult().trim();
+        }
+        return null;
+    }
+
+    private String extractReusableTextPayload(String toolOutputEntry) {
+        String rawOutput = extractToolOutput(toolOutputEntry);
+        if (rawOutput == null || rawOutput.isBlank()) {
+            return null;
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(rawOutput);
+            String structuredText = extractPreferredTextField(root);
+            if (structuredText != null && !structuredText.isBlank()) {
+                return structuredText;
+            }
+        } catch (Exception ignored) {
+            // Non-JSON outputs remain valid reusable text payloads.
+        }
+
+        return rawOutput.trim();
+    }
+
+    private String extractPreferredTextField(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            String text = node.asText().trim();
+            return text.isBlank() ? null : text;
+        }
+        if (node.isObject()) {
+            for (String key : List.of("text", "content", "markdown", "body", "message", "result", "summary", "answer", "output")) {
+                JsonNode child = node.get(key);
+                if (child == null) {
+                    continue;
+                }
+                String text = extractPreferredTextField(child);
+                if (text != null && !text.isBlank()) {
+                    return text;
+                }
+            }
+            for (String key : List.of("data", "payload", "response")) {
+                JsonNode child = node.get(key);
+                String text = extractPreferredTextField(child);
+                if (text != null && !text.isBlank()) {
+                    return text;
+                }
+            }
+            return null;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                String text = extractPreferredTextField(child);
+                if (text != null && !text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String extractToolOutput(String toolOutputEntry) {
+        if (toolOutputEntry == null || toolOutputEntry.isBlank()) {
+            return null;
+        }
+        int delimiterIndex = toolOutputEntry.indexOf('|');
+        if (delimiterIndex < 0 || delimiterIndex == toolOutputEntry.length() - 1) {
+            return null;
+        }
+        return toolOutputEntry.substring(delimiterIndex + 1).trim();
+    }
+
+    private String truncateForContext(String text, int maxLength) {
+        if (text == null || text.isBlank() || text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength).trim() + "...";
+    }
+
+    private String indentForExecutionContext(String text, String prefix) {
+        if (text == null || text.isBlank()) {
+            return prefix;
+        }
+        return text.lines()
+                .map(line -> prefix + line)
+                .collect(Collectors.joining("\n"));
     }
 
     private AgentDefinition resolveAgentDefinition(String agentId) {
@@ -1943,6 +2230,7 @@ public class WorkflowService {
         final List<String> usedTools;
         final List<String> usedToolCalls;
         final List<String> artifacts;
+        final List<String> toolOutputs;
         final boolean needsHumanFeedback;
         final String error;
         final int attempts;
@@ -1953,6 +2241,7 @@ public class WorkflowService {
                 List<String> usedTools,
                 List<String> usedToolCalls,
                 List<String> artifacts,
+                List<String> toolOutputs,
                 boolean needsHumanFeedback,
                 String error,
                 int attempts
@@ -1962,6 +2251,7 @@ public class WorkflowService {
             this.usedTools = usedTools == null ? List.of() : List.copyOf(usedTools);
             this.usedToolCalls = usedToolCalls == null ? List.of() : List.copyOf(usedToolCalls);
             this.artifacts = artifacts == null ? List.of() : List.copyOf(artifacts);
+            this.toolOutputs = toolOutputs == null ? List.of() : List.copyOf(toolOutputs);
             this.needsHumanFeedback = needsHumanFeedback;
             this.error = error;
             this.attempts = attempts;

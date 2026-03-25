@@ -4,10 +4,13 @@ import com.openmanus.saa.agent.AgentDefinition;
 import com.openmanus.saa.agent.AgentRegistryService;
 import com.openmanus.saa.agent.AgentRuntimeFactory;
 import com.openmanus.saa.agent.ResolvedAgentRuntime;
+import com.openmanus.saa.model.IntentResolution;
+import com.openmanus.saa.model.IntentRouteMode;
 import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.model.AgentResponse;
 import com.openmanus.saa.model.PlanResponse;
 import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.service.intent.IntentResolutionService;
 import com.openmanus.saa.service.session.SessionMemoryService;
 import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.util.List;
@@ -25,6 +28,7 @@ public class ManusAgentService {
     private final WorkflowService workflowService;
     private final AgentRegistryService agentRegistryService;
     private final AgentRuntimeFactory agentRuntimeFactory;
+    private final IntentResolutionService intentResolutionService;
 
     public ManusAgentService(
             ChatClient chatClient,
@@ -34,7 +38,8 @@ public class ManusAgentService {
             SessionMemoryService sessionMemoryService,
             WorkflowService workflowService,
             AgentRegistryService agentRegistryService,
-            AgentRuntimeFactory agentRuntimeFactory
+            AgentRuntimeFactory agentRuntimeFactory,
+            IntentResolutionService intentResolutionService
     ) {
         this.chatClient = chatClient;
         this.properties = properties;
@@ -44,13 +49,15 @@ public class ManusAgentService {
         this.workflowService = workflowService;
         this.agentRegistryService = agentRegistryService;
         this.agentRuntimeFactory = agentRuntimeFactory;
+        this.intentResolutionService = intentResolutionService;
     }
 
     public AgentResponse routeChat(String sessionId, String prompt, String agentId) {
-        RequestRoutingService.RouteMode routeMode = requestRoutingService.decideChatOrPlan(prompt);
-        return switch (routeMode) {
-            case DIRECT_CHAT -> chat(sessionId, prompt, agentId);
-            case PLAN_EXECUTE -> executeWithPlan(sessionId, prompt);
+        SessionState session = sessionMemoryService.getOrCreate(sessionId);
+        IntentResolution intentResolution = intentResolutionService.resolve(prompt, session);
+        return switch (intentResolution.routeMode()) {
+            case DIRECT_CHAT -> chat(sessionId, prompt, firstNonBlank(agentId, intentResolution.preferredAgentId()));
+            case PLAN_EXECUTE -> executeWithPlan(sessionId, prompt, intentResolution);
         };
     }
 
@@ -116,6 +123,17 @@ public class ManusAgentService {
 
     public AgentResponse executeWithPlan(String sessionId, String objective) {
         return workflowService.executeAsAgentResponse(sessionId, objective);
+    }
+
+    public AgentResponse executeWithPlan(String sessionId, String objective, IntentResolution intentResolution) {
+        return workflowService.executeAsAgentResponse(sessionId, objective, intentResolution);
+    }
+
+    private String firstNonBlank(String requestedAgentId, String preferredAgentId) {
+        if (requestedAgentId != null && !requestedAgentId.isBlank()) {
+            return requestedAgentId;
+        }
+        return preferredAgentId;
     }
 
     private String formatChatMarkdown(String prompt, String content) {

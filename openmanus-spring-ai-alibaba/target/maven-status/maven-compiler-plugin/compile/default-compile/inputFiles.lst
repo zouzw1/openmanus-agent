@@ -4,6 +4,7 @@ D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\AgentRuntimeFactory.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\AuthorizedMcpToolCallback.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\AuthorizedSkillToolCallback.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\BundledClasspathAgentConfigSource.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\CapabilityAccessMode.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\IdAccessPolicy.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\agent\LocalFileAgentConfigSource.java
@@ -35,6 +36,8 @@ D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\HumanFeedbackRequest.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\HumanFeedbackResponse.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\InferencePolicy.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\IntentResolution.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\IntentRouteMode.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\mcp\McpConnectRequest.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\mcp\McpInvokeRequest.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\mcp\McpServerStatus.java
@@ -63,6 +66,12 @@ D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\AgentCapabilitySnapshotService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\browser\BrowserSessionService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\HumanFeedbackResolutionService.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\intent\AbstractIntentTreeRecognizer.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\intent\IntentDecision.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\intent\IntentRecognizer.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\intent\IntentResolutionService.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\intent\IntentTreeNode.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\intent\SimpleIntentTreeNode.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\ManusAgentService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\mcp\McpConnection.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\mcp\McpPromptContextService.java
@@ -76,6 +85,9 @@ D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\session\SessionMemoryService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\SkillCapabilityService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\SkillsService.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\summary\DefaultWorkflowSummaryFormatter.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\summary\WorkflowSummaryContext.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\summary\WorkflowSummaryFormatter.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\ToolRegistryService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\service\WorkflowService.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\tool\BrowserAutomationTools.java

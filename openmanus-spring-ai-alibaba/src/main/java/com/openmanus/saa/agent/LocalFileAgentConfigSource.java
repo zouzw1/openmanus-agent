@@ -14,10 +14,12 @@ import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.Yaml;
 
 @Component
+@Order(100)
 public class LocalFileAgentConfigSource implements AgentConfigSource {
 
     private static final Logger log = LoggerFactory.getLogger(LocalFileAgentConfigSource.class);
@@ -54,10 +56,6 @@ public class LocalFileAgentConfigSource implements AgentConfigSource {
                         definitions.add(parseDefinition(file, (Map<String, Object>) root));
                     }
                 }
-            }
-
-            if (definitions.isEmpty() && properties.isFailFast()) {
-                throw new IllegalStateException("No local agent definitions found under " + configDirectory);
             }
 
             log.info("Loaded {} local agent definitions from {}", definitions.size(), configDirectory);

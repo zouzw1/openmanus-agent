@@ -7,6 +7,7 @@
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
         <module name="mcp-test-service" />
+        <module name="study-plan-demo" />
         <module name="openmanus-spring-ai-alibaba" />
       </profile>
     </annotationProcessing>
@@ -15,6 +16,7 @@
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
       <module name="mcp-test-service" options="-parameters" />
       <module name="openmanus-spring-ai-alibaba" options="-parameters" />
+      <module name="study-plan-demo" options="-parameters" />
     </option>
   </component>
 </project>

@@ -7,15 +7,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.aop.support.AopUtils;
+import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.ListableBeanFactory;
+import org.springframework.util.ReflectionUtils;
 import org.springframework.stereotype.Component;
 
 @Component
 public class LocalToolCallbackCatalog {
-
-    private static final String TOOL_PACKAGE_PREFIX = "com.openmanus.saa.tool";
 
     private final Map<String, ToolCallback> callbacksByName;
 
@@ -23,7 +23,7 @@ public class LocalToolCallbackCatalog {
         Map<String, ToolCallback> callbacks = new LinkedHashMap<>();
         for (String beanName : beanFactory.getBeanNamesForType(Object.class, false, false)) {
             Class<?> beanType = beanFactory.getType(beanName, false);
-            if (beanType == null || !beanType.getPackageName().startsWith(TOOL_PACKAGE_PREFIX)) {
+            if (beanType == null || !hasToolMethods(beanType)) {
                 continue;
             }
             if (McpToolBridge.class.isAssignableFrom(beanType)) {
@@ -32,7 +32,7 @@ public class LocalToolCallbackCatalog {
 
             Object bean = beanFactory.getBean(beanName);
             Class<?> targetClass = AopUtils.getTargetClass(bean);
-            if (targetClass == null || !targetClass.getPackageName().startsWith(TOOL_PACKAGE_PREFIX)) {
+            if (targetClass == null || !hasToolMethods(targetClass)) {
                 continue;
             }
             if (McpToolBridge.class.isAssignableFrom(targetClass)) {
@@ -59,5 +59,15 @@ public class LocalToolCallbackCatalog {
                 .map(callbacksByName::get)
                 .filter(java.util.Objects::nonNull)
                 .toList();
+    }
+
+    private boolean hasToolMethods(Class<?> beanType) {
+        final boolean[] found = {false};
+        ReflectionUtils.doWithMethods(
+                beanType,
+                method -> found[0] = true,
+                method -> method.isAnnotationPresent(Tool.class) && !method.isSynthetic() && !method.isBridge()
+        );
+        return found[0];
     }
 }

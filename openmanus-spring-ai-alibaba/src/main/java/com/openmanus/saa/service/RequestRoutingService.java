@@ -2,6 +2,8 @@ package com.openmanus.saa.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openmanus.saa.model.IntentResolution;
+import com.openmanus.saa.model.IntentRouteMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -26,6 +28,10 @@ public class RequestRoutingService {
     }
 
     public RouteMode decideChatOrPlan(String prompt) {
+        return toLegacyMode(resolveDefaultIntent(prompt).routeMode());
+    }
+
+    public IntentResolution resolveDefaultIntent(String prompt) {
         String content = chatClient.prompt()
                 .system("""
                         You are a routing node for an AI agent system.
@@ -68,31 +74,43 @@ public class RequestRoutingService {
                 .call()
                 .content();
 
-        return parseMode(content);
+        IntentRouteMode routeMode = parseMode(content);
+        return new IntentResolution(
+                routeMode == IntentRouteMode.DIRECT_CHAT ? "default_direct_chat" : "default_plan_execute",
+                0.6d,
+                routeMode,
+                null,
+                java.util.Map.of(),
+                java.util.List.of()
+        );
     }
 
-    private RouteMode parseMode(String content) {
+    private IntentRouteMode parseMode(String content) {
         if (content == null || content.isBlank()) {
-            return RouteMode.PLAN_EXECUTE;
+            return IntentRouteMode.PLAN_EXECUTE;
         }
 
         String normalized = stripMarkdownCodeFence(content);
         try {
             JsonNode root = objectMapper.readTree(normalized);
             String mode = root.path("mode").asText("");
-            return RouteMode.valueOf(mode);
+            return IntentRouteMode.valueOf(mode);
         } catch (Exception e) {
             log.warn("Failed to parse routing decision as JSON, falling back to text parsing: {}", content, e);
         }
 
         String upper = normalized.toUpperCase();
         if (upper.contains("DIRECT_CHAT")) {
-            return RouteMode.DIRECT_CHAT;
+            return IntentRouteMode.DIRECT_CHAT;
         }
         if (upper.contains("PLAN_EXECUTE")) {
-            return RouteMode.PLAN_EXECUTE;
+            return IntentRouteMode.PLAN_EXECUTE;
         }
-        return RouteMode.PLAN_EXECUTE;
+        return IntentRouteMode.PLAN_EXECUTE;
+    }
+
+    private RouteMode toLegacyMode(IntentRouteMode routeMode) {
+        return routeMode == IntentRouteMode.DIRECT_CHAT ? RouteMode.DIRECT_CHAT : RouteMode.PLAN_EXECUTE;
     }
 
     private String stripMarkdownCodeFence(String content) {

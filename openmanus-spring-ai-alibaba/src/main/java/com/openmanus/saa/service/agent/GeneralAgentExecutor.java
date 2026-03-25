@@ -52,7 +52,8 @@ public class GeneralAgentExecutor implements SpecialistAgent {
         String languageDirective = ResponseLanguageHelper.responseDirective(objective);
         List<String> usedTools = new ArrayList<>();
         List<String> usedToolCalls = new ArrayList<>();
-        ResolvedAgentRuntime runtime = agentRuntimeFactory.resolveForStep(agentDefinition, step, usedTools, usedToolCalls);
+        List<String> toolOutputs = new ArrayList<>();
+        ResolvedAgentRuntime runtime = agentRuntimeFactory.resolveForStep(agentDefinition, step, usedTools, usedToolCalls, toolOutputs);
 
         String contextHint = """
 
@@ -115,7 +116,8 @@ public class GeneralAgentExecutor implements SpecialistAgent {
         return new AgentExecutionResult(
                 result,
                 List.copyOf(new LinkedHashSet<>(usedTools)),
-                List.copyOf(usedToolCalls)
+                List.copyOf(usedToolCalls),
+                List.copyOf(toolOutputs)
         );
     }
 }

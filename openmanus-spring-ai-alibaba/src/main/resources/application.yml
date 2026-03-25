@@ -18,7 +18,7 @@ openmanus:
   agent:
     max-steps: 8
     workspace: ./workspace
-    shell-enabled: false
+    shell-enabled: true
     shell-timeout-seconds: 15
     workflow-use-data-analysis-agent: true
     planning-validation:
@@ -81,3 +81,4 @@ management:
     web:
       exposure:
         include: health,info
+
