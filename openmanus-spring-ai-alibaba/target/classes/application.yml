@@ -19,7 +19,7 @@ openmanus:
     max-steps: 8
     workspace: ./workspace
     shell-enabled: true
-    shell-timeout-seconds: 15
+    shell-timeout-seconds: 120
     workflow-use-data-analysis-agent: true
     planning-validation:
       enabled: false
@@ -52,6 +52,11 @@ openmanus:
     enabled: false
     image: python:3.12-slim
     working-directory: /workspace
+    mount-workspace: true
+    workspace-mount-path: /workspace
+    auto-pull-image: true
+    shell-executable: sh
+    shell-option: -lc
     memory-limit: 512m
     timeout-seconds: 30
     network-enabled: false

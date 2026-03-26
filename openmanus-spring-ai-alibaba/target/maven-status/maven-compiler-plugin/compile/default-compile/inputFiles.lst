@@ -43,7 +43,10 @@ D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\mcp\McpServerStatus.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\mcp\McpToolCallResult.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\mcp\McpToolMetadata.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\OutputEvaluationResult.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\OutputEvaluationStatus.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\PlanResponse.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\ResponseMode.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\sandbox\SandboxCommandRequest.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\sandbox\SandboxCommandResponse.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\model\session\ConversationMessage.java
@@ -97,5 +100,6 @@ D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\tool\ShellTools.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\tool\WorkspaceTools.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\util\HumanFeedbackResolver.java
+D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\util\IntentResolutionHelper.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\util\ParameterMissingDetector.java
 D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\src\main\java\com\openmanus\saa\util\ResponseLanguageHelper.java

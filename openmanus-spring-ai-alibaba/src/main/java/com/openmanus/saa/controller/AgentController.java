@@ -44,6 +44,18 @@ public class AgentController {
 
     @PostMapping("/chat")
     public AgentResponse chat(@Valid @RequestBody AgentRequest request) {
+        HumanFeedbackRequest pendingFeedback = workflowService.getPendingFeedback(request.sessionId()).orElse(null);
+        if (pendingFeedback != null) {
+            WorkflowFeedbackRequest feedbackRequest = new WorkflowFeedbackRequest(
+                    request.sessionId(),
+                    null,
+                    request.prompt(),
+                    null,
+                    null
+            );
+            HumanFeedbackResponse feedback = humanFeedbackResolutionService.resolve(feedbackRequest, pendingFeedback);
+            return workflowService.submitHumanFeedbackAsAgentResponse(request.sessionId(), feedback);
+        }
         return manusAgentService.routeChat(request.sessionId(), request.prompt(), request.agentId());
     }
 

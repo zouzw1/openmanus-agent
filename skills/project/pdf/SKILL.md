@@ -2,6 +2,12 @@
 name: pdf
 description: Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.
 license: Proprietary. LICENSE.txt has complete terms
+aliases: [pdf]
+operations: [read, edit, export, format, convert]
+input_formats: [md, txt, html, pdf]
+output_formats: [pdf]
+execution_hints: [runPowerShell, readWorkspaceFile, writeWorkspaceFile, listWorkspaceFiles]
+planning_hint: 用于 PDF 导出、读取、编辑或格式处理。若目标是 .pdf，可优先选择该 skill。
 ---
 
 # PDF Processing Guide
@@ -312,3 +318,4 @@ with open("encrypted.pdf", "wb") as output:
 - For JavaScript libraries (pdf-lib), see REFERENCE.md
 - If you need to fill out a PDF form, follow the instructions in FORMS.md
 - For troubleshooting guides, see REFERENCE.md
+

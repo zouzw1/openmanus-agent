@@ -8,7 +8,8 @@ public record WorkflowExecutionResponse(
         List<String> artifacts,
         List<String> executionLog,
         WorkflowSummary summary,
-        HumanFeedbackRequest pendingFeedback
+        HumanFeedbackRequest pendingFeedback,
+        OutputEvaluationResult outputEvaluation
 ) {
     public WorkflowExecutionResponse(
             String objective,
@@ -17,7 +18,7 @@ public record WorkflowExecutionResponse(
             List<String> executionLog,
             WorkflowSummary summary
     ) {
-        this(objective, steps, artifacts, executionLog, summary, null);
+        this(objective, steps, artifacts, executionLog, summary, null, null);
     }
 
     public WorkflowExecutionResponse(
@@ -26,6 +27,6 @@ public record WorkflowExecutionResponse(
             List<String> executionLog,
             WorkflowSummary summary
     ) {
-        this(objective, steps, List.of(), executionLog, summary, null);
+        this(objective, steps, List.of(), executionLog, summary, null, null);
     }
 }

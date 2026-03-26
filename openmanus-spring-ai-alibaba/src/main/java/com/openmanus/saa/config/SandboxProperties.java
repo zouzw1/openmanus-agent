@@ -8,6 +8,12 @@ public class SandboxProperties {
     private boolean enabled = false;
     private String image = "python:3.12-slim";
     private String workingDirectory = "/workspace";
+    private boolean mountWorkspace = true;
+    private String hostWorkspacePath = "";
+    private String workspaceMountPath = "/workspace";
+    private boolean autoPullImage = true;
+    private String shellExecutable = "sh";
+    private String shellOption = "-lc";
     private String memoryLimit = "512m";
     private int timeoutSeconds = 30;
     private boolean networkEnabled = false;
@@ -34,6 +40,54 @@ public class SandboxProperties {
 
     public void setWorkingDirectory(String workingDirectory) {
         this.workingDirectory = workingDirectory;
+    }
+
+    public boolean isMountWorkspace() {
+        return mountWorkspace;
+    }
+
+    public void setMountWorkspace(boolean mountWorkspace) {
+        this.mountWorkspace = mountWorkspace;
+    }
+
+    public String getHostWorkspacePath() {
+        return hostWorkspacePath;
+    }
+
+    public void setHostWorkspacePath(String hostWorkspacePath) {
+        this.hostWorkspacePath = hostWorkspacePath;
+    }
+
+    public String getWorkspaceMountPath() {
+        return workspaceMountPath;
+    }
+
+    public void setWorkspaceMountPath(String workspaceMountPath) {
+        this.workspaceMountPath = workspaceMountPath;
+    }
+
+    public boolean isAutoPullImage() {
+        return autoPullImage;
+    }
+
+    public void setAutoPullImage(boolean autoPullImage) {
+        this.autoPullImage = autoPullImage;
+    }
+
+    public String getShellExecutable() {
+        return shellExecutable;
+    }
+
+    public void setShellExecutable(String shellExecutable) {
+        this.shellExecutable = shellExecutable;
+    }
+
+    public String getShellOption() {
+        return shellOption;
+    }
+
+    public void setShellOption(String shellOption) {
+        this.shellOption = shellOption;
     }
 
     public String getMemoryLimit() {

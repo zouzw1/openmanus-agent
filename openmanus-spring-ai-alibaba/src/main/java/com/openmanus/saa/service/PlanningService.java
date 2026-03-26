@@ -230,6 +230,7 @@ public class PlanningService {
         List<WorkflowStep> enrichedSteps = enrichStepsWithToolMetadata(draftSafeSteps, objective);
         List<WorkflowStep> deduplicatedSteps = removeDuplicateWorkflowSteps(enrichedSteps);
         List<WorkflowStep> normalizedSteps = enforceWorkflowStructure(objective, deduplicatedSteps, agentSnapshots);
+        removeRedundantOfficeDeliveryWrites(normalizedSteps);
         validateWorkflowPlanOrThrow(objective, normalizedSteps, agentSnapshots);
         return normalizedSteps;
     }
@@ -909,9 +910,15 @@ public class PlanningService {
                 .map(Object::toString)
                 .orElse("")
                 .trim();
-        String inferredSkillName = existingSkillName.isBlank()
+        String normalizedExistingSkill = resolveActualSkillName(existingSkillName);
+        if (normalizedExistingSkill != null
+                && !isSkillCompatibleWithStep(normalizedExistingSkill, stepDescription, parameters)) {
+            parameters.remove("skillName");
+            normalizedExistingSkill = null;
+        }
+        String inferredSkillName = normalizedExistingSkill == null
                 ? resolveSkillNameForStep(stepDescription, parameters)
-                : normalizeSkillName(existingSkillName);
+                : normalizedExistingSkill;
         if (inferredSkillName == null) {
             return;
         }
@@ -920,15 +927,51 @@ public class PlanningService {
         requiredTools.add("read_skill");
     }
 
+    private String resolveActualSkillName(String skillName) {
+        String normalized = normalizeSkillName(skillName);
+        if (normalized == null) {
+            return null;
+        }
+        return skillCapabilityService.resolveSkillName(normalized).orElse(normalized);
+    }
+
+    private boolean isSkillCompatibleWithStep(
+            String skillName,
+            String stepDescription,
+            Map<String, Object> parameters
+    ) {
+        if (skillName == null || skillName.isBlank()) {
+            return false;
+        }
+        if ("project-planning".equals(skillName)) {
+            return true;
+        }
+        String targetFormat = inferTargetFormatForSkillResolution(stepDescription, parameters);
+        if (targetFormat == null || targetFormat.isBlank()) {
+            return true;
+        }
+        Set<String> supportedOutputs = supportedOutputFormatsForSkill(skillName);
+        if (supportedOutputs.isEmpty()) {
+            return true;
+        }
+        if (isTextDraftFormat(targetFormat)) {
+            return supportedOutputs.contains(targetFormat);
+        }
+        return supportedOutputs.contains(targetFormat);
+    }
+
     private String resolveSkillNameForStep(String stepDescription, Map<String, Object> parameters) {
+        String targetFormat = inferTargetFormatForSkillResolution(stepDescription, parameters);
         String explicitSkill = skillCapabilityService.findMentionedSkillName(stepDescription)
                 .map(this::normalizeSkillName)
                 .orElse(null);
-        if (explicitSkill != null) {
+        if (explicitSkill != null
+                && isSkillCompatibleWithStep(explicitSkill, stepDescription, parameters)
+                && (explicitlyInvokesSkill(stepDescription, explicitSkill)
+                || (targetFormat != null && !isTextDraftFormat(targetFormat)))) {
             return explicitSkill;
         }
 
-        String targetFormat = inferTargetFormatForSkillResolution(stepDescription, parameters);
         if (targetFormat == null || !looksLikeSkillManagedOutputStep(stepDescription, parameters, targetFormat)) {
             return null;
         }
@@ -936,6 +979,16 @@ public class PlanningService {
         return skillCapabilityService.resolveUniqueSkillForOutputFormat(targetFormat)
                 .map(this::normalizeSkillName)
                 .orElse(null);
+    }
+
+    private boolean explicitlyInvokesSkill(String stepDescription, String skillName) {
+        if (stepDescription == null || stepDescription.isBlank() || skillName == null || skillName.isBlank()) {
+            return false;
+        }
+        String normalizedDescription = stepDescription.toLowerCase();
+        String normalizedSkillName = skillName.toLowerCase();
+        return normalizedDescription.contains(normalizedSkillName)
+                && mentionsAny(normalizedDescription, "skill", "技能", "调用", "使用");
     }
 
     private String inferTargetFormatForSkillResolution(String stepDescription, Map<String, Object> parameters) {
@@ -1000,27 +1053,15 @@ public class PlanningService {
         if (text == null || text.isBlank() || !skillsService.isEnabled()) {
             return null;
         }
-        String normalized = text.toLowerCase();
-        List<String> availableSkillNames = skillsService.listSkills().stream()
-                .map(SkillInfoResponse::name)
-                .toList();
-        if (mentionsAny(normalized, "word", "docx", ".docx")) {
-            return pickAvailableSkill(availableSkillNames, "docx");
+        Optional<String> explicitSkill = skillCapabilityService.findMentionedSkillName(text);
+        if (explicitSkill.isPresent()) {
+            return explicitSkill.get();
         }
-        if (mentionsAny(normalized, "ppt", "pptx", "powerpoint", "slides")) {
-            return pickAvailableSkill(availableSkillNames, "pptx");
+        String targetFormat = inferFormatFromText(text);
+        if (targetFormat == null) {
+            return null;
         }
-        if (mentionsAny(normalized, "pdf", "portable document")) {
-            return pickAvailableSkill(availableSkillNames, "pdf");
-        }
-        if (mentionsAny(normalized, "markdown-converter", "convert to markdown", "export markdown", "markdown conversion")) {
-            return pickAvailableSkill(availableSkillNames, "markdown-converter");
-        }
-        return availableSkillNames.stream()
-                .filter(skillName -> normalized.contains(skillName.toLowerCase()))
-                .findFirst()
-                .map(this::normalizeSkillName)
-                .orElse(null);
+        return skillCapabilityService.resolveUniqueSkillForOutputFormat(targetFormat).orElse(null);
     }
 
     private boolean shouldUseObjectiveForSkillInference(
@@ -1090,14 +1131,6 @@ public class PlanningService {
         return pathFormat != null && objectiveFormat != null && objectiveFormat.equals(pathFormat);
     }
 
-    private String pickAvailableSkill(List<String> availableSkillNames, String preferredSkillName) {
-        return availableSkillNames.stream()
-                .filter(skillName -> preferredSkillName.equalsIgnoreCase(skillName))
-                .findFirst()
-                .map(this::normalizeSkillName)
-                .orElse(null);
-    }
-
     private String normalizeSkillName(String skillName) {
         if (skillName == null) {
             return null;
@@ -1117,7 +1150,7 @@ public class PlanningService {
         if (!(skillNameValue instanceof String skillName) || skillName.isBlank()) {
             return null;
         }
-        return normalizeSkillName(skillName);
+        return resolveActualSkillName(skillName);
     }
 
     private boolean isExportTransformStep(WorkflowStep step) {
@@ -1210,6 +1243,106 @@ public class PlanningService {
         while (!steps.isEmpty() && isTerminalDeliveryStep(steps.get(steps.size() - 1))) {
             steps.remove(steps.size() - 1);
         }
+    }
+
+    private void removeRedundantOfficeDeliveryWrites(List<WorkflowStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return;
+        }
+
+        List<WorkflowStep> filtered = new ArrayList<>();
+        LinkedHashSet<String> exportedFormats = new LinkedHashSet<>();
+        LinkedHashSet<String> exportedPaths = new LinkedHashSet<>();
+
+        for (WorkflowStep step : steps) {
+            String targetFormat = inferStepTargetFormat(step);
+            String relativePath = relativePath(step);
+
+            if (isDuplicateOfficeExportStep(step, targetFormat, relativePath, exportedFormats, exportedPaths)) {
+                continue;
+            }
+
+            if (isExportTransformStep(step)) {
+                filtered.add(step);
+                if (targetFormat != null && !targetFormat.isBlank()) {
+                    exportedFormats.add(targetFormat);
+                }
+                if (relativePath != null) {
+                    exportedPaths.add(normalizeValue(relativePath));
+                }
+                continue;
+            }
+
+            if (isRedundantOfficeWriteStep(step, targetFormat, relativePath, exportedFormats, exportedPaths)) {
+                continue;
+            }
+
+            filtered.add(step);
+        }
+
+        steps.clear();
+        steps.addAll(filtered);
+    }
+
+    private boolean isDuplicateOfficeExportStep(
+            WorkflowStep step,
+            String targetFormat,
+            String relativePath,
+            Set<String> exportedFormats,
+            Set<String> exportedPaths
+    ) {
+        if (step == null || targetFormat == null || isTextDraftFormat(targetFormat)) {
+            return false;
+        }
+        if (!isExportTransformStep(step)) {
+            return false;
+        }
+
+        if (relativePath != null && exportedPaths.contains(normalizeValue(relativePath))) {
+            return true;
+        }
+        return exportedFormats.contains(targetFormat);
+    }
+
+    private boolean isRedundantOfficeWriteStep(
+            WorkflowStep step,
+            String targetFormat,
+            String relativePath,
+            Set<String> exportedFormats,
+            Set<String> exportedPaths
+    ) {
+        if (step == null || targetFormat == null || isTextDraftFormat(targetFormat)) {
+            return false;
+        }
+        if (!isWorkspaceWriteStep(step)) {
+            return false;
+        }
+
+        if (relativePath != null && exportedPaths.contains(normalizeValue(relativePath))) {
+            return true;
+        }
+        return exportedFormats.contains(targetFormat);
+    }
+
+    private boolean isWorkspaceWriteStep(WorkflowStep step) {
+        if (step == null) {
+            return false;
+        }
+        List<String> requiredTools = step.requiredTools() == null ? List.of() : step.requiredTools();
+        return requiredTools.contains("writeWorkspaceFile")
+                && !requiredTools.contains("createPlan")
+                && !requiredTools.contains("callMcpTool");
+    }
+
+    private String relativePath(WorkflowStep step) {
+        if (step == null || step.parameterContext() == null) {
+            return null;
+        }
+        Object value = step.parameterContext().get("relativePath");
+        if (value instanceof String path && !path.isBlank()) {
+            return path.trim();
+        }
+        return null;
     }
 
     private WorkflowStep buildDraftPreparationStep(
@@ -1526,10 +1659,8 @@ public class PlanningService {
         builder.append("- If a step needs a skill, include read_skill in requiredTools and set parameters.skillName to the exact skill name.\n");
         builder.append("- A skill is not the same thing as a local tool. Do not refer to a skill name as if it were a callable local tool.\n");
         builder.append("- Do not automatically add local tools just because a skill may internally use them during execution.\n");
-        builder.append("- For Word/.docx deliverables prefer skillName=docx.\n");
-        builder.append("- For PDF deliverables prefer skillName=pdf.\n");
-        builder.append("- For PowerPoint/PPTX deliverables prefer skillName=pptx.\n");
-        builder.append("- For Markdown conversion prefer skillName=markdown-converter.\n");
+        builder.append("- For file exports, prefer skills whose inferred outputFormats match the requested deliverable format.\n");
+        builder.append("- Do not assume fixed skill names. Use the actual skill names listed below.\n");
         builder.append("- Skills remain loadable capabilities via read_skill. Local tools should appear in requiredTools only when the step explicitly invokes them.\n\n");
         builder.append("Available skill names:\n");
         for (SkillInfoResponse skill : skills) {
@@ -1541,6 +1672,8 @@ public class PlanningService {
             if (capability != null) {
                 builder.append(" [operations=")
                         .append(capability.operations().isEmpty() ? "none" : String.join(", ", capability.operations()))
+                        .append(", aliases=")
+                        .append(capability.aliases().isEmpty() ? "none" : String.join(", ", capability.aliases()))
                         .append(", inputFormats=")
                         .append(capability.inputFormats().isEmpty() ? "none" : String.join(", ", capability.inputFormats()))
                         .append(", outputFormats=")

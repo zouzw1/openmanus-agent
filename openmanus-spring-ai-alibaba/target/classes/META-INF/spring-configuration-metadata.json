@@ -182,10 +182,22 @@
       "sourceType": "com.openmanus.saa.config.McpProperties"
     },
     {
+      "name": "openmanus.sandbox.auto-pull-image",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": true
+    },
+    {
       "name": "openmanus.sandbox.enabled",
       "type": "java.lang.Boolean",
       "sourceType": "com.openmanus.saa.config.SandboxProperties",
       "defaultValue": false
+    },
+    {
+      "name": "openmanus.sandbox.host-workspace-path",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": ""
     },
     {
       "name": "openmanus.sandbox.image",
@@ -200,10 +212,28 @@
       "defaultValue": "512m"
     },
     {
+      "name": "openmanus.sandbox.mount-workspace",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": true
+    },
+    {
       "name": "openmanus.sandbox.network-enabled",
       "type": "java.lang.Boolean",
       "sourceType": "com.openmanus.saa.config.SandboxProperties",
       "defaultValue": false
+    },
+    {
+      "name": "openmanus.sandbox.shell-executable",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": "sh"
+    },
+    {
+      "name": "openmanus.sandbox.shell-option",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": "-lc"
     },
     {
       "name": "openmanus.sandbox.timeout-seconds",
@@ -213,6 +243,12 @@
     },
     {
       "name": "openmanus.sandbox.working-directory",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.SandboxProperties",
+      "defaultValue": "\/workspace"
+    },
+    {
+      "name": "openmanus.sandbox.workspace-mount-path",
       "type": "java.lang.String",
       "sourceType": "com.openmanus.saa.config.SandboxProperties",
       "defaultValue": "\/workspace"

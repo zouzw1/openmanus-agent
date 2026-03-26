@@ -31,6 +31,7 @@ capabilities:
       - skill:pdf
       - skill:pptx
       - skill:docx
+      - skill:docx-format
       - skill:markdown-converter
       - skill:skill-creator
       - skill:tavily-search-pro

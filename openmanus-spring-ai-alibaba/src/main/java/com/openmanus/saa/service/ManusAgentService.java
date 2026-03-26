@@ -1,5 +1,6 @@
 package com.openmanus.saa.service;
 
+import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.openmanus.saa.agent.AgentDefinition;
 import com.openmanus.saa.agent.AgentRegistryService;
 import com.openmanus.saa.agent.AgentRuntimeFactory;
@@ -76,7 +77,13 @@ public class ManusAgentService {
                 objective,
                 planOutput,
                 planOutput,
-                plan.steps()
+                plan.steps(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null
         );
     }
 
@@ -93,15 +100,15 @@ public class ManusAgentService {
         String reply = chatClient.prompt()
                 .system("""
                         %s
-
+                        
                         %s
-
+                        
                         %s
                         """.formatted(properties.getSystemPrompt(), runtime.systemPrompt(), languageDirective))
                 .user("""
                         Conversation history:
                         %s
-
+                        
                         Current user request:
                         %s
                         """.formatted(history, prompt))
@@ -117,7 +124,13 @@ public class ManusAgentService {
                 prompt,
                 reply,
                 formatChatMarkdown(prompt, reply),
-                List.of()
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null
         );
     }
 

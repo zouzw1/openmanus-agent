@@ -12,10 +12,11 @@ public record AgentResponse(
         List<String> artifacts,
         List<String> executionLog,
         WorkflowSummary workflowSummary,
-        HumanFeedbackRequest pendingFeedback
+        HumanFeedbackRequest pendingFeedback,
+        OutputEvaluationResult outputEvaluation
 ) {
     public AgentResponse(String mode, String content, List<String> steps) {
-        this(mode, null, null, content, steps, List.of(), List.of(), List.of(), null, null);
+        this(mode, null, null, content, steps, List.of(), List.of(), List.of(), null, null, null);
     }
 
     public AgentResponse(
@@ -25,6 +26,6 @@ public record AgentResponse(
             String content,
             List<String> steps
     ) {
-        this(mode, objective, summary, content, steps, List.of(), List.of(), List.of(), null, null);
+        this(mode, objective, summary, content, steps, List.of(), List.of(), List.of(), null, null, null);
     }
 }

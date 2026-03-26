@@ -72,11 +72,28 @@ public class WorkspaceTools {
     }
 
     private Path resolve(String relativePath) {
-        String safePath = relativePath == null || relativePath.isBlank() ? "." : relativePath;
-        Path target = workspaceRoot.resolve(safePath).normalize();
+        String safePath = normalizeWorkspaceRelativePath(relativePath);
+        Path target = workspaceRoot.resolve(safePath == null || safePath.isBlank() ? "." : safePath).normalize();
         if (!target.startsWith(workspaceRoot)) {
             throw new IllegalArgumentException("Path escapes workspace: " + relativePath);
         }
         return target;
+    }
+
+    private String normalizeWorkspaceRelativePath(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return ".";
+        }
+        String normalized = relativePath.replace('\\', '/').trim();
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        if (normalized.equals("workspace")) {
+            return ".";
+        }
+        while (normalized.startsWith("workspace/")) {
+            normalized = normalized.substring("workspace/".length());
+        }
+        return normalized;
     }
 }

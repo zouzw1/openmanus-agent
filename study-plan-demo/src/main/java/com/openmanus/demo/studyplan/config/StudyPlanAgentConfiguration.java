@@ -39,6 +39,7 @@ public class StudyPlanAgentConfiguration {
                                 "recommendLearningGoals",
                                 "buildWeeklyStudySchedule",
                                 "generatePracticeChecklist",
+                                "runPowerShell",
                                 "callMcpTool",
                                 "writeWorkspaceFile",
                                 "readWorkspaceFile",
@@ -46,7 +47,7 @@ public class StudyPlanAgentConfiguration {
                         )
                 ),
                 new McpAccessPolicy(CapabilityAccessMode.ALLOW_LIST, Set.of("demo-sse"), Set.of()),
-                new IdAccessPolicy(CapabilityAccessMode.DENY_ALL, Set.of())
+                new IdAccessPolicy(CapabilityAccessMode.ALLOW_LIST, Set.of("skill:docx-format"))
         );
         return () -> List.of(studyPlanner);
     }

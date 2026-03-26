@@ -11,6 +11,7 @@ server:
 openmanus:
   agent:
     shell-enabled: true
+    shell-timeout-seconds: 120
     system-prompt: |
       You are a study-plan demo built on top of the OpenManus Spring AI Alibaba SDK.
       Use the dedicated learning-plan tools when users ask for study roadmaps, weekly plans, or checklists.
