@@ -39,3 +39,6 @@ capabilities:
       - skill:markdown-converter
       - skill:skill-creator
       - skill:tavily-search-pro
+rag:
+  enabled: true
+  mode: tool

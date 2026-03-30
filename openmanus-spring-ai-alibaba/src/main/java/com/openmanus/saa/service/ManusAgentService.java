@@ -1,6 +1,5 @@
 package com.openmanus.saa.service;
 
-import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.openmanus.saa.agent.AgentDefinition;
 import com.openmanus.saa.agent.AgentRegistryService;
 import com.openmanus.saa.agent.AgentRuntimeFactory;
@@ -11,6 +10,7 @@ import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.model.AgentResponse;
 import com.openmanus.saa.model.PlanResponse;
 import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.service.agent.ReactAgentExecutionSupport;
 import com.openmanus.saa.service.intent.IntentResolutionService;
 import com.openmanus.saa.service.session.SessionMemoryService;
 import com.openmanus.saa.util.ResponseLanguageHelper;
@@ -30,6 +30,7 @@ public class ManusAgentService {
     private final AgentRegistryService agentRegistryService;
     private final AgentRuntimeFactory agentRuntimeFactory;
     private final IntentResolutionService intentResolutionService;
+    private final ReactAgentExecutionSupport reactAgentExecutionSupport;
 
     public ManusAgentService(
             ChatClient chatClient,
@@ -40,7 +41,8 @@ public class ManusAgentService {
             WorkflowService workflowService,
             AgentRegistryService agentRegistryService,
             AgentRuntimeFactory agentRuntimeFactory,
-            IntentResolutionService intentResolutionService
+            IntentResolutionService intentResolutionService,
+            ReactAgentExecutionSupport reactAgentExecutionSupport
     ) {
         this.chatClient = chatClient;
         this.properties = properties;
@@ -51,6 +53,7 @@ public class ManusAgentService {
         this.agentRegistryService = agentRegistryService;
         this.agentRuntimeFactory = agentRuntimeFactory;
         this.intentResolutionService = intentResolutionService;
+        this.reactAgentExecutionSupport = reactAgentExecutionSupport;
     }
 
     public AgentResponse routeChat(String sessionId, String prompt, String agentId) {
@@ -97,26 +100,40 @@ public class ManusAgentService {
         ResolvedAgentRuntime runtime = agentRuntimeFactory.resolve(agentDefinition);
         String history = sessionMemoryService.summarizeHistory(session, 12);
         String languageDirective = ResponseLanguageHelper.responseDirective(prompt);
-        String reply = chatClient.prompt()
-                .system("""
-                        %s
-                        
-                        %s
-                        
-                        %s
-                        """.formatted(properties.getSystemPrompt(), runtime.systemPrompt(), languageDirective))
-                .user("""
-                        Conversation history:
-                        %s
-                        
-                        Current user request:
-                        %s
-                        """.formatted(history, prompt))
-                .advisors(runtime.advisors())
-                .toolCallbacks(runtime.toolCallbacks())
-                .toolContext(runtime.toolContext())
-                .call()
-                .content();
+        String systemPrompt = """
+                %s
+                
+                %s
+                
+                %s
+                """.formatted(properties.getSystemPrompt(), runtime.systemPrompt(), languageDirective);
+        String userMessage = """
+                Conversation history:
+                %s
+                
+                Current user request:
+                %s
+                """.formatted(history, prompt);
+
+        String reply;
+        try {
+            reply = reactAgentExecutionSupport.execute(
+                    agentDefinition,
+                    runtime,
+                    systemPrompt,
+                    "Answer the user's latest request using the conversation history as context and available tools when helpful.",
+                    userMessage
+            );
+        } catch (Exception ex) {
+            reply = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(userMessage)
+                    .advisors(runtime.advisors())
+                    .toolCallbacks(runtime.toolCallbacks())
+                    .toolContext(runtime.toolContext())
+                    .call()
+                    .content();
+        }
 
         session.addMessage("assistant", reply);
         return new AgentResponse(

@@ -1,5 +1,7 @@
 package com.openmanus.saa.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -80,22 +82,23 @@ public class WorkflowStep {
         );
     }
 
+    @JsonCreator
     public WorkflowStep(
-            String agent,
-            String description,
-            List<String> requiredTools,
-            List<String> usedTools,
-            List<String> usedCapabilities,
-            List<String> artifacts,
-            List<String> toolOutputs,
-            Map<String, Object> parameterContext,
-            StepStatus status,
-            String result,
-            LocalDateTime startTime,
-            LocalDateTime endTime,
-            String errorMessage,
-            Integer attemptCount,
-            boolean needsHumanFeedback
+            @JsonProperty("agent") String agent,
+            @JsonProperty("description") String description,
+            @JsonProperty("requiredTools") List<String> requiredTools,
+            @JsonProperty("usedTools") List<String> usedTools,
+            @JsonProperty("usedCapabilities") List<String> usedCapabilities,
+            @JsonProperty("artifacts") List<String> artifacts,
+            @JsonProperty("toolOutputs") List<String> toolOutputs,
+            @JsonProperty("parameterContext") Map<String, Object> parameterContext,
+            @JsonProperty("status") StepStatus status,
+            @JsonProperty("result") String result,
+            @JsonProperty("startTime") LocalDateTime startTime,
+            @JsonProperty("endTime") LocalDateTime endTime,
+            @JsonProperty("errorMessage") String errorMessage,
+            @JsonProperty("attemptCount") Integer attemptCount,
+            @JsonProperty("needsHumanFeedback") boolean needsHumanFeedback
     ) {
         this.agent = agent;
         this.description = description;

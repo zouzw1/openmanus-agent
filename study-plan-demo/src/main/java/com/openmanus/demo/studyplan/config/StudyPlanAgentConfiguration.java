@@ -2,6 +2,8 @@ package com.openmanus.demo.studyplan.config;
 
 import com.openmanus.saa.agent.AgentConfigSource;
 import com.openmanus.saa.agent.AgentDefinition;
+import com.openmanus.saa.agent.AgentRagConfig;
+import com.openmanus.saa.agent.AgentRagMode;
 import com.openmanus.saa.agent.CapabilityAccessMode;
 import com.openmanus.saa.agent.IdAccessPolicy;
 import com.openmanus.saa.agent.McpAccessPolicy;
@@ -47,8 +49,11 @@ public class StudyPlanAgentConfiguration {
                         )
                 ),
                 new McpAccessPolicy(CapabilityAccessMode.ALLOW_LIST, Set.of("demo-sse"), Set.of()),
-                new IdAccessPolicy(CapabilityAccessMode.ALLOW_LIST, Set.of("skill:docx-format"))
+                new IdAccessPolicy(CapabilityAccessMode.ALLOW_LIST, Set.of("skill:docx-format")),
+                new AgentRagConfig(true, AgentRagMode.HYBRID, Set.of("java_test"), 5)
         );
         return () -> List.of(studyPlanner);
     }
 }
+
+

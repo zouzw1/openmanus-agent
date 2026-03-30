@@ -14,6 +14,7 @@ public class AgentDefinition {
     private final IdAccessPolicy localTools;
     private final McpAccessPolicy mcp;
     private final IdAccessPolicy skills;
+    private final AgentRagConfig rag;
 
     public AgentDefinition(
             String id,
@@ -29,6 +30,38 @@ public class AgentDefinition {
             McpAccessPolicy mcp,
             IdAccessPolicy skills
     ) {
+        this(
+                id,
+                name,
+                enabled,
+                executorType,
+                description,
+                planningVisible,
+                priority,
+                systemPrompt,
+                promptFile,
+                localTools,
+                mcp,
+                skills,
+                AgentRagConfig.disabled()
+        );
+    }
+
+    public AgentDefinition(
+            String id,
+            String name,
+            boolean enabled,
+            String executorType,
+            String description,
+            boolean planningVisible,
+            int priority,
+            String systemPrompt,
+            String promptFile,
+            IdAccessPolicy localTools,
+            McpAccessPolicy mcp,
+            IdAccessPolicy skills,
+            AgentRagConfig rag
+    ) {
         this.id = id;
         this.name = name;
         this.enabled = enabled;
@@ -41,6 +74,7 @@ public class AgentDefinition {
         this.localTools = localTools;
         this.mcp = mcp;
         this.skills = skills;
+        this.rag = rag == null ? AgentRagConfig.disabled() : rag;
     }
 
     public String getId() {
@@ -89,5 +123,9 @@ public class AgentDefinition {
 
     public IdAccessPolicy getSkills() {
         return skills;
+    }
+
+    public AgentRagConfig getRag() {
+        return rag;
     }
 }

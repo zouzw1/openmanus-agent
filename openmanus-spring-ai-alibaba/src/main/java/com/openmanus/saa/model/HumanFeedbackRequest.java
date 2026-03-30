@@ -1,5 +1,7 @@
 package com.openmanus.saa.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,19 +31,21 @@ public class HumanFeedbackRequest {
             String errorMessage,
             String suggestedAction
     ) {
-        this(sessionId, objective, planId, stepIndex, failedStep, steps, errorMessage, suggestedAction, null);
+        this(sessionId, objective, planId, stepIndex, failedStep, steps, errorMessage, suggestedAction, null, null);
     }
 
+    @JsonCreator
     public HumanFeedbackRequest(
-            String sessionId,
-            String objective,
-            String planId,
-            int stepIndex,
-            WorkflowStep failedStep,
-            List<WorkflowStep> steps,
-            String errorMessage,
-            String suggestedAction,
-            String userFeedback
+            @JsonProperty("sessionId") String sessionId,
+            @JsonProperty("objective") String objective,
+            @JsonProperty("planId") String planId,
+            @JsonProperty("stepIndex") int stepIndex,
+            @JsonProperty("failedStep") WorkflowStep failedStep,
+            @JsonProperty("steps") List<WorkflowStep> steps,
+            @JsonProperty("errorMessage") String errorMessage,
+            @JsonProperty("suggestedAction") String suggestedAction,
+            @JsonProperty("userFeedback") String userFeedback,
+            @JsonProperty("requestTime") LocalDateTime requestTime
     ) {
         this.sessionId = sessionId;
         this.objective = objective;
@@ -55,7 +59,7 @@ public class HumanFeedbackRequest {
                 .collect(Collectors.toList());
         this.errorMessage = errorMessage;
         this.suggestedAction = suggestedAction;
-        this.requestTime = LocalDateTime.now();
+        this.requestTime = requestTime == null ? LocalDateTime.now() : requestTime;
         this.userFeedback = userFeedback;
     }
 

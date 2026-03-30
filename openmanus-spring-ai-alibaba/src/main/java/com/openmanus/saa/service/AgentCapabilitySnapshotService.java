@@ -43,7 +43,16 @@ public class AgentCapabilitySnapshotService {
         Set<String> knownLocalToolNames = toolRegistryService.getEnabledTools().stream()
                 .map(ToolMetadata::getName)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        List<String> localTools = agentDefinition.getLocalTools().resolveAllowed(knownLocalToolNames).stream()
+        Set<String> allowedLocalToolNames = new LinkedHashSet<>(agentDefinition.getLocalTools().resolveAllowed(knownLocalToolNames));
+        if (agentDefinition.getRag().usesTools()) {
+            if (knownLocalToolNames.contains("rag_ingest")) {
+                allowedLocalToolNames.add("rag_ingest");
+            }
+            if (knownLocalToolNames.contains("rag_search")) {
+                allowedLocalToolNames.add("rag_search");
+            }
+        }
+        List<String> localTools = allowedLocalToolNames.stream()
                 .sorted()
                 .toList();
 

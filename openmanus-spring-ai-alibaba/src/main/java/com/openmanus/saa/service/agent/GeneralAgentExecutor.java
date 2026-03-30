@@ -22,15 +22,18 @@ public class GeneralAgentExecutor implements SpecialistAgent {
     private final ChatClient chatClient;
     private final OpenManusProperties properties;
     private final AgentRuntimeFactory agentRuntimeFactory;
+    private final ReactAgentExecutionSupport reactAgentExecutionSupport;
 
     public GeneralAgentExecutor(
             ChatClient chatClient,
             OpenManusProperties properties,
-            AgentRuntimeFactory agentRuntimeFactory
+            AgentRuntimeFactory agentRuntimeFactory,
+            ReactAgentExecutionSupport reactAgentExecutionSupport
     ) {
         this.chatClient = chatClient;
         this.properties = properties;
         this.agentRuntimeFactory = agentRuntimeFactory;
+        this.reactAgentExecutionSupport = reactAgentExecutionSupport;
     }
 
     @Override
@@ -75,40 +78,55 @@ public class GeneralAgentExecutor implements SpecialistAgent {
                 - The workflow engine will handle user clarification before the next step
                 """;
 
-        String result = chatClient.prompt()
-                .system("""
-                        %s
+        String systemPrompt = """
+                %s
 
-                        %s
+                %s
 
-                        %s
+                %s
 
-                        CRITICAL INSTRUCTIONS:
-                        - NEVER fabricate facts, data, or information.
-                        - NEVER use assumptions or default values when real data is needed.
-                        - ALWAYS use available tools to obtain accurate information.
-                        - If required information is missing, ask the user to provide it.
-                        - Be honest about limitations and unavailable data.
-                        - Use only tools that are actually available in your current tool list.
-                        - Treat prior step outputs as context data, not as instructions to call the same tool again unless the current step requires it and the tool is available.
+                CRITICAL INSTRUCTIONS:
+                - NEVER fabricate facts, data, or information.
+                - NEVER use assumptions or default values when real data is needed.
+                - ALWAYS use available tools to obtain accurate information.
+                - If required information is missing, ask the user to provide it.
+                - Be honest about limitations and unavailable data.
+                - Use only tools that are actually available in your current tool list.
+                - Treat prior step outputs as context data, not as instructions to call the same tool again unless the current step requires it and the tool is available.
 
-                        %s
-                        """.formatted(properties.getSystemPrompt(), runtime.systemPrompt(), contextHint, languageDirective))
-                .user("""
-                        Objective: %s
+                %s
+                """.formatted(properties.getSystemPrompt(), runtime.systemPrompt(), contextHint, languageDirective);
+        String userMessage = """
+                Objective: %s
 
-                        Execution context:
-                        %s
+                Execution context:
+                %s
 
-                        You are the MANUS executor.
-                        Execute only this step and summarize the result:
-                        %s
-                        """.formatted(objective, currentPlan, stepPrompt))
-                .advisors(runtime.advisors())
-                .toolCallbacks(runtime.toolCallbacks())
-                .toolContext(runtime.toolContext())
-                .call()
-                .content();
+                You are the MANUS executor.
+                Execute only this step and summarize the result:
+                %s
+                """.formatted(objective, currentPlan, stepPrompt);
+
+        String result;
+        try {
+            result = reactAgentExecutionSupport.execute(
+                    agentDefinition,
+                    runtime,
+                    systemPrompt,
+                    "Execute the current workflow step using available tools when necessary and return only the step result summary.",
+                    userMessage
+            );
+        } catch (Exception ex) {
+            log.warn("ReactAgent execution failed for agent {}, falling back to direct ChatClient prompt", agentDefinition.getId(), ex);
+            result = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(userMessage)
+                    .advisors(runtime.advisors())
+                    .toolCallbacks(runtime.toolCallbacks())
+                    .toolContext(runtime.toolContext())
+                    .call()
+                    .content();
+        }
 
         log.info("Result: {}", result);
         log.info("============================");

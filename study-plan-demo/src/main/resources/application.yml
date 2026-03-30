@@ -4,6 +4,10 @@ spring:
   ai:
     dashscope:
       api-key: sk-e149a15431ec48ceb6a839cab679762e
+      embedding:
+        enabled: true
+        options:
+          model: text-embedding-v3
 
 server:
   port: 8091
@@ -25,3 +29,11 @@ openmanus:
         sse-endpoint: /sse
   skills:
     enabled: true
+  rag:
+    enabled: true
+    backend: elasticsearch
+    elasticsearch:
+      uris:
+        - http://127.0.0.1:9200
+      index-prefix: openmanus_demo_kb
+      vector-dimensions: 1024

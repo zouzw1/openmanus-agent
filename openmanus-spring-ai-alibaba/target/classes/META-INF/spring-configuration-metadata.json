@@ -27,6 +27,29 @@
       "sourceType": "com.openmanus.saa.config.McpProperties"
     },
     {
+      "name": "openmanus.rag",
+      "type": "com.openmanus.saa.config.RagProperties",
+      "sourceType": "com.openmanus.saa.config.RagProperties"
+    },
+    {
+      "name": "openmanus.rag.elasticsearch",
+      "type": "com.openmanus.saa.config.RagProperties$Elasticsearch",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "sourceMethod": "getElasticsearch()"
+    },
+    {
+      "name": "openmanus.rag.ingestion",
+      "type": "com.openmanus.saa.config.RagProperties$Ingestion",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "sourceMethod": "getIngestion()"
+    },
+    {
+      "name": "openmanus.rag.retrieval",
+      "type": "com.openmanus.saa.config.RagProperties$Retrieval",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "sourceMethod": "getRetrieval()"
+    },
+    {
       "name": "openmanus.sandbox",
       "type": "com.openmanus.saa.config.SandboxProperties",
       "sourceType": "com.openmanus.saa.config.SandboxProperties"
@@ -180,6 +203,92 @@
       "name": "openmanus.mcp.servers",
       "type": "java.util.Map<java.lang.String,com.openmanus.saa.config.McpProperties$ServerConfig>",
       "sourceType": "com.openmanus.saa.config.McpProperties"
+    },
+    {
+      "name": "openmanus.rag.backend",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "defaultValue": "elasticsearch"
+    },
+    {
+      "name": "openmanus.rag.citation-enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.rag.default-hybrid",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "defaultValue": true
+    },
+    {
+      "name": "openmanus.rag.default-top-k",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "defaultValue": 5
+    },
+    {
+      "name": "openmanus.rag.elasticsearch.index-prefix",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Elasticsearch",
+      "defaultValue": "openmanus_kb"
+    },
+    {
+      "name": "openmanus.rag.elasticsearch.password",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Elasticsearch",
+      "defaultValue": ""
+    },
+    {
+      "name": "openmanus.rag.elasticsearch.uris",
+      "type": "java.lang.String[]",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Elasticsearch",
+      "defaultValue": [
+        "http:\/\/localhost:9200"
+      ]
+    },
+    {
+      "name": "openmanus.rag.elasticsearch.username",
+      "type": "java.lang.String",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Elasticsearch",
+      "defaultValue": ""
+    },
+    {
+      "name": "openmanus.rag.elasticsearch.vector-dimensions",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Elasticsearch",
+      "defaultValue": 1024
+    },
+    {
+      "name": "openmanus.rag.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.openmanus.saa.config.RagProperties",
+      "defaultValue": false
+    },
+    {
+      "name": "openmanus.rag.ingestion.chunk-overlap",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Ingestion",
+      "defaultValue": 120
+    },
+    {
+      "name": "openmanus.rag.ingestion.chunk-size",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Ingestion",
+      "defaultValue": 800
+    },
+    {
+      "name": "openmanus.rag.retrieval.max-context-chars",
+      "type": "java.lang.Integer",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Retrieval",
+      "defaultValue": 6000
+    },
+    {
+      "name": "openmanus.rag.retrieval.min-score",
+      "type": "java.lang.Double",
+      "sourceType": "com.openmanus.saa.config.RagProperties$Retrieval",
+      "defaultValue": 0
     },
     {
       "name": "openmanus.sandbox.auto-pull-image",

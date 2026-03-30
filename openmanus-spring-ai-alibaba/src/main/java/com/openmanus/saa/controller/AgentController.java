@@ -11,6 +11,8 @@ import com.openmanus.saa.service.ManusAgentService;
 import com.openmanus.saa.service.PlanningService;
 import com.openmanus.saa.service.WorkflowService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +26,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/agent")
 public class AgentController {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentController.class);
 
     private final ManusAgentService manusAgentService;
     private final PlanningService planningService;
@@ -46,6 +50,11 @@ public class AgentController {
     public AgentResponse chat(@Valid @RequestBody AgentRequest request) {
         HumanFeedbackRequest pendingFeedback = workflowService.getPendingFeedback(request.sessionId()).orElse(null);
         if (pendingFeedback != null) {
+            log.info(
+                    "Routing /api/agent/chat request as workflow feedback for session {} at step {}",
+                    request.sessionId(),
+                    pendingFeedback.getStepIndex() + 1
+            );
             WorkflowFeedbackRequest feedbackRequest = new WorkflowFeedbackRequest(
                     request.sessionId(),
                     null,
@@ -56,6 +65,10 @@ public class AgentController {
             HumanFeedbackResponse feedback = humanFeedbackResolutionService.resolve(feedbackRequest, pendingFeedback);
             return workflowService.submitHumanFeedbackAsAgentResponse(request.sessionId(), feedback);
         }
+        log.info(
+                "Routing /api/agent/chat request as normal chat/plan request for session {}",
+                request.sessionId()
+        );
         return manusAgentService.routeChat(request.sessionId(), request.prompt(), request.agentId());
     }
 

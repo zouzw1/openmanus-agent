@@ -8,6 +8,7 @@ import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.PlanResponse;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.SkillInfoResponse;
+import com.openmanus.saa.model.ToolMetadata;
 import com.openmanus.saa.model.mcp.McpToolMetadata;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.service.mcp.McpService;
@@ -422,6 +423,7 @@ public class PlanningService {
                     }
                 }
 
+                normalizeMisclassifiedLocalToolInvocation(requiredTools, parameters);
                 enrichSkillMetadata(step.description(), objective, requiredTools, parameters);
                 normalizeSkillExecutionPlan(step.description(), objective, requiredTools, parameters);
 
@@ -737,10 +739,109 @@ public class PlanningService {
 
     private String buildPlanningToolGuidance() {
         return toolRegistryService.generateEnabledToolsPromptGuidance()
+                + "\n\nPLANNING DISAMBIGUATION RULES:\n"
+                + "- If a tool name exists in the local tool list, use that exact local tool name directly in requiredTools.\n"
+                + "- Do NOT wrap a local tool inside callMcpTool.\n"
+                + "- Use callMcpTool only for MCP tools explicitly listed in the available MCP tools section, with the exact serverId and toolName.\n"
+                + "- If a capability name appears in the user request but it is not listed under available MCP tools, do not invent an MCP call for it.\n"
                 + "\n\n"
                 + buildSkillPlanningGuidance()
                 + "\n\n"
                 + mcpPromptContextService.describeAvailableTools();
+    }
+
+    private void normalizeMisclassifiedLocalToolInvocation(
+            Set<String> requiredTools,
+            Map<String, Object> parameters
+    ) {
+        if (requiredTools == null || parameters == null || !requiredTools.contains("callMcpTool")) {
+            return;
+        }
+
+        Object toolNameValue = parameters.get("toolName");
+        if (!(toolNameValue instanceof String toolName) || toolName.isBlank()) {
+            return;
+        }
+
+        String normalizedToolName = toolName.trim();
+        Optional<ToolMetadata> localTool = toolRegistryService.getTool(normalizedToolName);
+        if (localTool.isEmpty()) {
+            return;
+        }
+
+        String serverId = Optional.ofNullable(parameters.get("serverId"))
+                .map(Object::toString)
+                .orElse("")
+                .trim();
+        boolean mcpToolExists = !serverId.isBlank() && mcpService.findToolMetadata(serverId, normalizedToolName).isPresent();
+        if (mcpToolExists) {
+            return;
+        }
+
+        Map<String, Object> extractedArguments = parseToolArguments(parameters.get("argumentsJson"));
+        Map<String, Object> normalizedParameters = new LinkedHashMap<>();
+        for (ToolMetadata.ParameterSchema parameterSchema : localTool.get().getParameters()) {
+            String parameterName = parameterSchema.getName();
+            Object directValue = parameters.get(parameterName);
+            if (directValue != null) {
+                normalizedParameters.put(parameterName, directValue);
+                continue;
+            }
+            Object argumentValue = extractedArguments.get(parameterName);
+            if (argumentValue != null) {
+                normalizedParameters.put(parameterName, argumentValue);
+                continue;
+            }
+            String alias = resolveLocalToolParameterAlias(parameterName);
+            if (alias != null && extractedArguments.get(alias) != null) {
+                normalizedParameters.put(parameterName, extractedArguments.get(alias));
+            }
+        }
+
+        parameters.clear();
+        parameters.putAll(normalizedParameters);
+        requiredTools.remove("callMcpTool");
+        requiredTools.add(normalizedToolName);
+    }
+
+    private Map<String, Object> parseToolArguments(Object argumentsJsonValue) {
+        if (argumentsJsonValue == null) {
+            return Map.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(String.valueOf(argumentsJsonValue));
+            if (!root.isObject()) {
+                return Map.of();
+            }
+            Map<String, Object> parsed = new LinkedHashMap<>();
+            Iterator<Map.Entry<String, JsonNode>> fields = root.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                JsonNode value = entry.getValue();
+                if (value.isTextual()) {
+                    parsed.put(entry.getKey(), value.asText());
+                } else if (value.isNumber()) {
+                    parsed.put(entry.getKey(), value.numberValue());
+                } else if (value.isBoolean()) {
+                    parsed.put(entry.getKey(), value.asBoolean());
+                } else {
+                    parsed.put(entry.getKey(), value.toString());
+                }
+            }
+            return parsed;
+        } catch (Exception ex) {
+            return Map.of();
+        }
+    }
+
+    private String resolveLocalToolParameterAlias(String parameterName) {
+        if (parameterName == null || parameterName.isBlank()) {
+            return null;
+        }
+        return switch (parameterName) {
+            case "relativePath" -> "filePath";
+            default -> null;
+        };
     }
 
     private String buildAgentCapabilityPrompt(List<AgentCapabilitySnapshot> agentSnapshots) {
@@ -992,6 +1093,10 @@ public class PlanningService {
     }
 
     private String inferTargetFormatForSkillResolution(String stepDescription, Map<String, Object> parameters) {
+        String formatFromDescription = inferFormatFromText(stepDescription);
+        if (formatFromDescription != null && !formatFromDescription.isBlank() && !isTextDraftFormat(formatFromDescription)) {
+            return formatFromDescription;
+        }
         if (parameters != null) {
             Object relativePath = parameters.get("relativePath");
             if (relativePath instanceof String path && !path.isBlank()) {
@@ -1001,7 +1106,7 @@ public class PlanningService {
                 }
             }
         }
-        return inferFormatFromText(stepDescription);
+        return formatFromDescription;
     }
 
     private boolean looksLikeSkillManagedOutputStep(
@@ -1407,7 +1512,17 @@ public class PlanningService {
     }
 
     private String inferRequestedDeliverableFormat(String text) {
-        return inferFormatFromText(text);
+        String format = inferFormatFromText(text);
+        if (format == null || format.isBlank()) {
+            return null;
+        }
+        if (looksLikeRagIngestionRequest(text)) {
+            return null;
+        }
+        if (isTextDraftFormat(format) && !explicitlyRequestsConcreteTextDeliverable(text)) {
+            return null;
+        }
+        return format;
     }
 
     private void validateObjectiveCapabilitySupportOrThrow(String objective, List<AgentCapabilitySnapshot> agentSnapshots) {
@@ -1447,6 +1562,48 @@ public class PlanningService {
                 "文件",
                 "文档",
                 "工作区"
+        );
+    }
+
+    private boolean explicitlyRequestsConcreteTextDeliverable(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String normalized = text.toLowerCase();
+        return mentionsAny(
+                normalized,
+                "输出为",
+                "导出为",
+                "保存为",
+                "生成",
+                "write to",
+                "save as",
+                "export as",
+                "output as",
+                "deliverable",
+                "最终文件",
+                "最终文档",
+                "markdown 文档",
+                "markdown文件",
+                "text file",
+                "plain text"
+        );
+    }
+
+    private boolean looksLikeRagIngestionRequest(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String normalized = text.toLowerCase();
+        return mentionsAny(
+                normalized,
+                "rag_ingest",
+                "ingest into",
+                "ingest",
+                "导入知识库",
+                "导入到知识库",
+                "写入知识库",
+                "知识库"
         );
     }
 

@@ -1,63 +1,60 @@
-import sys
 import os
 from docx import Document
+from docx.shared import Pt, RGBColor
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-# Read markdown file
-def read_markdown_file(filepath):
+# 读取Markdown文件内容
+def read_md_file(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         return f.read()
 
-# Simple markdown to docx converter
-def markdown_to_docx(md_content, output_path):
+# 创建格式化的Word文档
+def create_formatted_docx(md_content, output_path):
     doc = Document()
     
-    # Split content by lines
-    lines = md_content.split('\n')
+    # 设置默认字体
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'SimSun'  # 中文字体
+    font.size = Pt(12)
     
+    # 处理Markdown内容并添加到文档
+    lines = md_content.split('\n')
     for line in lines:
         line = line.strip()
+        if not line:
+            continue
         
-        # Handle headers
-        if line.startswith('# '):
-            paragraph = doc.add_heading(line[2:], level=1)
+        # 处理标题（#、##、###）
+        if line.startswith('### '):
+            p = doc.add_paragraph(line[4:], 'Heading 3')
+            p.runs[0].font.size = Pt(14)
         elif line.startswith('## '):
-            paragraph = doc.add_heading(line[3:], level=2)
-        elif line.startswith('### '):
-            paragraph = doc.add_heading(line[4:], level=3)
-        elif line.startswith('#### '):
-            paragraph = doc.add_heading(line[5:], level=4)
-        # Handle lists
-        elif line.startswith('- ') or line.startswith('* '):
-            paragraph = doc.add_paragraph(line[2:], style='List Bullet')
-        elif line.startswith('1. '):
-            paragraph = doc.add_paragraph(line[3:], style='List Number')
-        # Handle code blocks
-        elif line.startswith('```'):
-            continue  # Skip code block markers
-        # Handle regular paragraphs
-        elif line:
-            paragraph = doc.add_paragraph(line)
-        # Handle empty lines
+            p = doc.add_paragraph(line[3:], 'Heading 2')
+            p.runs[0].font.size = Pt(16)
+        elif line.startswith('# '):
+            p = doc.add_paragraph(line[2:], 'Heading 1')
+            p.runs[0].font.size = Pt(18)
         else:
-            doc.add_paragraph()
+            # 普通段落
+            p = doc.add_paragraph(line)
+            
+            # 设置中英文字体
+            for run in p.runs:
+                run.font.name = 'SimSun'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimSun')
+                run.font.size = Pt(12)
     
-    # Save document
+    # 保存文档
     doc.save(output_path)
 
+# 主程序
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print('Usage: python convert_md_to_docx.py <input_md_file> <output_docx_file>')
-        sys.exit(1)
+    # 读取Markdown文件
+    md_content = read_md_file('travel_plan.md')
     
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    # 创建格式化的Word文档
+    create_formatted_docx(md_content, '南京7日旅行计划.docx')
     
-    if not os.path.exists(input_file):
-        print(f'Error: Input file {input_file} does not exist')
-        sys.exit(1)
-    
-    md_content = read_markdown_file(input_file)
-    markdown_to_docx(md_content, output_file)
-    print(f'Successfully converted {input_file} to {output_file}')
+    print('Word文档已成功生成：南京7日旅行计划.docx')

@@ -67,6 +67,25 @@ openmanus:
         type: sse
         url: http://127.0.0.1:18080/mcp
         sse-endpoint: /sse
+  rag:
+    enabled: false
+    backend: elasticsearch
+    default-top-k: 5
+    default-hybrid: true
+    citation-enabled: true
+    retrieval:
+      min-score: 0.0
+      max-context-chars: 6000
+    ingestion:
+      chunk-size: 800
+      chunk-overlap: 120
+    elasticsearch:
+      uris:
+        - http://localhost:9200
+      index-prefix: openmanus_kb
+      username: ""
+      password: ""
+      vector-dimensions: 1024
   skills:
     enabled: true
     lazy-load: true

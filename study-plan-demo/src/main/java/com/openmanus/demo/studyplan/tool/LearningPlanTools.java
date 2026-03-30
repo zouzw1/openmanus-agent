@@ -1,13 +1,29 @@
 package com.openmanus.demo.studyplan.tool;
 
+import com.openmanus.saa.rag.api.RagRetrievalService;
+import com.openmanus.saa.rag.model.KnowledgeScope;
+import com.openmanus.saa.rag.model.RetrievalHit;
+import com.openmanus.saa.rag.model.RetrievalRequest;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 @Component
 public class LearningPlanTools {
+
+    private static final String DEFAULT_KNOWLEDGE_BASE = "java_test";
+
+    private final ObjectProvider<RagRetrievalService> ragRetrievalServiceProvider;
+
+    public LearningPlanTools(ObjectProvider<RagRetrievalService> ragRetrievalServiceProvider) {
+        this.ragRetrievalServiceProvider = ragRetrievalServiceProvider;
+    }
 
     @Tool(description = "Recommend concrete learning goals, milestones, and staged outcomes for a study topic.")
     public String recommendLearningGoals(
@@ -19,20 +35,28 @@ public class LearningPlanTools {
         String normalizedTopic = normalizeTopic(topic);
         String normalizedLevel = normalizeLevel(learnerLevel);
         if (isJavaBeginner(normalizedTopic, learnerLevel)) {
-            return """
-                    %s（%s）阶段目标与里程碑：
+            String base = """
+                    # %s（%s）阶段目标与里程碑
+
+                    ## 阶段目标
                     1. 第 1-2 周：完成开发环境搭建，掌握变量、条件、循环、输入输出等基础语法。
                     2. 第 3-4 周：掌握方法、数组和面向对象基础，能够独立编写 200 行以内的小程序。
                     3. 第 5-6 周：掌握继承、多态、接口、字符串、集合和常用 API，能实现简单业务模型。
                     4. 第 7 周：掌握异常处理、文件读写和调试定位，能修复常见运行时问题。
                     5. 第 8 周：完成一个命令行综合项目，并能讲清楚核心设计与代码结构。
 
-                    建议验收里程碑：
-                    - 第 2 周末：能独立写出包含条件和循环的控制台程序
-                    - 第 4 周末：能设计类、对象、构造器并完成简单建模
-                    - 第 6 周末：能使用集合处理一组对象数据
-                    - 第 8 周末：能交付一个可运行的小项目并完成演示说明
+                    ## 建议验收里程碑
+                    - 第 2 周末：能独立写出包含条件和循环的控制台程序。
+                    - 第 4 周末：能设计类、对象、构造器并完成简单建模。
+                    - 第 6 周末：能使用集合处理一组对象数据。
+                    - 第 8 周末：能交付一个可运行的小项目并完成演示说明。
                     """.formatted(normalizedTopic, normalizedLevel).trim();
+            return appendKnowledgeBaseEnhancementSection(
+                    base,
+                    "知识库提炼的阶段建议",
+                    "Java 学习目标 里程碑 成果 复盘",
+                    List.of("里程碑", "成果", "复盘", "项目", "阶段")
+            );
         }
 
         return """
@@ -66,7 +90,13 @@ public class LearningPlanTools {
         int safeHours = Math.max(weeklyHours, 1);
 
         if (isJavaBeginner(normalizedTopic, learnerLevel) && safeWeeks == 8) {
-            return buildJavaBeginnerEightWeekSchedule(normalizedTopic, normalizedLevel, safeHours);
+            String base = buildJavaBeginnerEightWeekSchedule(normalizedTopic, normalizedLevel, safeHours);
+            return appendKnowledgeBaseEnhancementSection(
+                    base,
+                    "知识库提炼的执行原则",
+                    "Java 8周学习路线 周计划 复盘 验收 成果",
+                    List.of("每周", "复盘", "验收", "成果", "里程碑", "项目")
+            );
         }
         return buildGenericWeeklySchedule(normalizedTopic, normalizedLevel, safeWeeks, safeHours);
     }
@@ -85,54 +115,60 @@ public class LearningPlanTools {
         int safeWeeks = durationWeeks == null ? 8 : Math.max(durationWeeks, 1);
 
         if (isJavaBeginner(normalizedTopic, learnerLevel) && safeWeeks == 8) {
-            return """
-                    %s（%s）8 周练习与验收清单：
+            String base = """
+                    # %s（%s）8 周练习与验收清单
 
-                    第 1 周验收：
-                    - 能解释 JDK、JRE、JVM 的区别
-                    - 能独立编写 HelloWorld、变量演示、四则运算程序
-                    - 能说清楚基本数据类型及类型转换的使用场景
+                    ## 第 1 周验收
+                    - 能解释 JDK、JRE、JVM 的区别。
+                    - 能独立编写 HelloWorld、变量演示、四则运算程序。
+                    - 能说清楚基本数据类型及类型转换的使用场景。
 
-                    第 2 周验收：
-                    - 能使用 if/else、switch、for、while 完成分支与循环练习
-                    - 能独立完成九九乘法表、成绩评级、猜数字等 3 个练习
-                    - 能通过调试定位循环边界错误
+                    ## 第 2 周验收
+                    - 能使用 if/else、switch、for、while 完成分支与循环练习。
+                    - 能独立完成九九乘法表、成绩评级、猜数字等 3 个练习。
+                    - 能通过调试定位循环边界错误。
 
-                    第 3 周验收：
-                    - 能封装复用方法并合理设计参数、返回值
-                    - 能使用数组完成统计、查找、排序基础练习
-                    - 能完成一个“学生成绩统计”小程序
+                    ## 第 3 周验收
+                    - 能封装复用方法并合理设计参数、返回值。
+                    - 能使用数组完成统计、查找、排序基础练习。
+                    - 能完成一个“学生成绩统计”小程序。
 
-                    第 4 周验收：
-                    - 能设计类、对象、构造器、成员变量和成员方法
-                    - 能完成“图书”或“学生”实体类建模
-                    - 能解释封装的意义并使用 private + getter/setter
+                    ## 第 4 周验收
+                    - 能设计类、对象、构造器、成员变量和成员方法。
+                    - 能完成“图书”或“学生”实体类建模。
+                    - 能解释封装的意义并使用 private + getter/setter。
 
-                    第 5 周验收：
-                    - 能使用继承、重写、多态和接口组织代码
-                    - 能完成“支付方式”或“员工类型”多态练习
-                    - 能识别抽象类与接口的适用场景
+                    ## 第 5 周验收
+                    - 能使用继承、重写、多态和接口组织代码。
+                    - 能完成“支付方式”或“员工类型”多态练习。
+                    - 能识别抽象类与接口的适用场景。
 
-                    第 6 周验收：
-                    - 能使用 String、ArrayList、HashMap 处理一组业务数据
-                    - 能完成“学生通讯录”或“商品清单”管理练习
-                    - 能解释泛型的基本作用并避免原始类型集合
+                    ## 第 6 周验收
+                    - 能使用 String、ArrayList、HashMap 处理一组业务数据。
+                    - 能完成“学生通讯录”或“商品清单”管理练习。
+                    - 能解释泛型的基本作用并避免原始类型集合。
 
-                    第 7 周验收：
-                    - 能使用 try/catch/finally 处理常见异常
-                    - 能读写文本文件并保存程序数据
-                    - 能完成“成绩文件导入导出”或“日志记录”练习
+                    ## 第 7 周验收
+                    - 能使用 try/catch/finally 处理常见异常。
+                    - 能读写文本文件并保存程序数据。
+                    - 能完成“成绩文件导入导出”或“日志记录”练习。
 
-                    第 8 周验收：
-                    - 能交付一个可运行的命令行综合项目
-                    - 能演示核心功能、代码结构和主要类职责
-                    - 能总结 3 个做得好的点和 3 个后续优化点
+                    ## 第 8 周验收
+                    - 能交付一个可运行的命令行综合项目。
+                    - 能演示核心功能、代码结构和主要类职责。
+                    - 能总结 3 个做得好的点和 3 个后续优化点。
 
-                    通用执行要求：
-                    - 每周至少完成 3 个可运行的代码练习
-                    - 每周保留 1 次复盘，整理错误与易混概念
-                    - 每周输出 1 份可展示成果：代码、笔记、截图或讲解文档
+                    ## 通用执行要求
+                    - 每周至少完成 3 个可运行的代码练习。
+                    - 每周保留 1 次复盘，整理错误与易混概念。
+                    - 每周输出 1 份可展示成果：代码、笔记、截图或讲解文档。
                     """.formatted(normalizedTopic, normalizedLevel).trim();
+            return appendKnowledgeBaseEnhancementSection(
+                    base,
+                    "知识库提炼的验收与复盘建议",
+                    "Java 练习清单 周验收 复盘问题 学习成果",
+                    List.of("练习", "验收", "复盘", "成果", "项目", "每周")
+            );
         }
 
         return buildGenericChecklist(normalizedTopic, normalizedLevel, safeWeeks);
@@ -140,10 +176,12 @@ public class LearningPlanTools {
 
     private String buildJavaBeginnerEightWeekSchedule(String topic, String learnerLevel, int weeklyHours) {
         StringBuilder builder = new StringBuilder();
-        builder.append(topic)
+        builder.append("# ")
+                .append(topic)
                 .append("（")
                 .append(learnerLevel)
-                .append("）8 周学习路线图：\n")
+                .append("）8 周学习路线图\n\n")
+                .append("## 总体安排\n")
                 .append("- 总周期：8 周\n")
                 .append("- 每周投入：")
                 .append(weeklyHours)
@@ -268,16 +306,22 @@ public class LearningPlanTools {
             List<String> exercises,
             String deliverable
     ) {
-        builder.append("第 ").append(week).append(" 周：").append(theme).append("\n")
-                .append("- 学习重点：\n");
+        builder.append("## 第 ").append(week).append(" 周：").append(theme).append("\n")
+                .append("### 学习重点\n");
         for (String focus : focuses) {
-            builder.append("  - ").append(focus).append("\n");
+            builder.append("- ").append(focus).append("\n");
         }
-        builder.append("- 本周练习：\n");
+        builder.append("\n### 本周练习\n");
         for (int i = 0; i < exercises.size(); i++) {
-            builder.append("  ").append(i + 1).append(". ").append(exercises.get(i)).append("\n");
+            builder.append(i + 1).append(". ").append(exercises.get(i)).append("\n");
         }
-        builder.append("- 本周交付：").append(deliverable).append("\n\n");
+        builder.append("\n### 本周交付\n")
+                .append("- ").append(deliverable).append("\n\n")
+                .append("### 本周复盘问题\n");
+        for (String question : defaultReviewQuestions(theme)) {
+            builder.append("- ").append(question).append("\n");
+        }
+        builder.append("\n");
     }
 
     private boolean isJavaBeginner(String topic, String learnerLevel) {
@@ -304,5 +348,87 @@ public class LearningPlanTools {
             case "intermediate", "中级" -> "中级";
             default -> "初学者";
         };
+    }
+
+    private String appendKnowledgeBaseEnhancementSection(String base, String sectionTitle, String query, List<String> preferredKeywords) {
+        List<String> hints = retrieveKnowledgeHints(query, preferredKeywords);
+        if (hints.isEmpty()) {
+            return base;
+        }
+        StringBuilder builder = new StringBuilder(base);
+        builder.append("\n\n## ").append(sectionTitle).append("\n");
+        for (String hint : hints) {
+            builder.append("- ").append(hint).append("\n");
+        }
+        return builder.toString().trim();
+    }
+
+    private List<String> retrieveKnowledgeHints(String query, List<String> preferredKeywords) {
+        RagRetrievalService ragRetrievalService = ragRetrievalServiceProvider.getIfAvailable();
+        if (ragRetrievalService == null) {
+            return List.of();
+        }
+        List<RetrievalHit> hits = ragRetrievalService.retrieve(new RetrievalRequest(
+                query,
+                KnowledgeScope.ofKnowledgeBase(DEFAULT_KNOWLEDGE_BASE),
+                4,
+                true,
+                java.util.Map.of()
+        )).hits();
+        if (hits == null || hits.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> selected = new LinkedHashSet<>();
+        for (RetrievalHit hit : hits) {
+            String[] lines = hit.text() == null ? new String[0] : hit.text().split("\\r?\\n");
+            for (String rawLine : lines) {
+                String line = rawLine == null ? "" : rawLine.trim();
+                if (line.isBlank()) {
+                    continue;
+                }
+                String normalized = line.replaceFirst("^[-*]\\s*", "").replaceFirst("^\\d+\\.\\s*", "").trim();
+                if (normalized.isBlank()) {
+                    continue;
+                }
+                if (!looksLikeUsefulHint(normalized, preferredKeywords)) {
+                    continue;
+                }
+                selected.add(normalized);
+                if (selected.size() >= 6) {
+                    return new ArrayList<>(selected);
+                }
+            }
+        }
+        return new ArrayList<>(selected);
+    }
+
+    private boolean looksLikeUsefulHint(String line, List<String> preferredKeywords) {
+        if (line.length() < 8 || line.startsWith("#") || line.startsWith("##")) {
+            return false;
+        }
+        if (line.endsWith("：") || line.endsWith(":")) {
+            return false;
+        }
+        if (line.contains("资料用于辅助") || line.contains("文档用途") || line.contains("学习计划知识库")) {
+            return false;
+        }
+        if (preferredKeywords == null || preferredKeywords.isEmpty()) {
+            return true;
+        }
+        for (String keyword : preferredKeywords) {
+            if (keyword != null && !keyword.isBlank() && line.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> defaultReviewQuestions(String theme) {
+        return List.of(
+                "本周关于“" + theme + "”最容易混淆的 2-3 个点是什么？",
+                "我这周完成的练习里，哪一个最能证明我已经掌握了核心内容？",
+                "如果下周继续学习，我最需要提前补的知识点是什么？"
+        );
     }
 }

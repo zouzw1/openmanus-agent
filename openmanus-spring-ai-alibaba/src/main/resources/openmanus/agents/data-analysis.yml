@@ -24,3 +24,6 @@ capabilities:
       - demo-sse
   skills:
     mode: deny_all
+rag:
+  enabled: true
+  mode: tool

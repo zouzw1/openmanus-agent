@@ -2,11 +2,14 @@ package com.openmanus.saa.tool;
 
 import com.openmanus.saa.config.OpenManusProperties;
 import java.io.IOException;
+import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Comparator;
+import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -14,6 +17,11 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class WorkspaceTools {
+
+    private static final Set<String> BINARY_EXTENSIONS = Set.of(
+            ".doc", ".docx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+            ".zip", ".jar", ".class", ".exe", ".dll", ".so", ".pkl", ".bin"
+    );
 
     private final Path workspaceRoot;
 
@@ -55,7 +63,18 @@ public class WorkspaceTools {
         if (!Files.exists(target) || !Files.isRegularFile(target)) {
             return "File does not exist: " + target;
         }
-        return Files.readString(target, StandardCharsets.UTF_8);
+        if (looksBinary(target)) {
+            return "File is not a UTF-8 text file and cannot be read with readWorkspaceFile: "
+                    + workspaceRoot.relativize(target)
+                    + ". Use a format-appropriate tool instead.";
+        }
+        try {
+            return Files.readString(target, StandardCharsets.UTF_8);
+        } catch (MalformedInputException ex) {
+            return "File is not valid UTF-8 text and cannot be read with readWorkspaceFile: "
+                    + workspaceRoot.relativize(target)
+                    + ". Use a format-appropriate tool instead.";
+        }
     }
 
     @Tool(description = "Write a UTF-8 text file to the workspace, replacing existing content")
@@ -95,5 +114,15 @@ public class WorkspaceTools {
             normalized = normalized.substring("workspace/".length());
         }
         return normalized;
+    }
+
+    private boolean looksBinary(Path target) {
+        String fileName = target.getFileName() == null ? "" : target.getFileName().toString().toLowerCase(Locale.ROOT);
+        for (String extension : BINARY_EXTENSIONS) {
+            if (fileName.endsWith(extension)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

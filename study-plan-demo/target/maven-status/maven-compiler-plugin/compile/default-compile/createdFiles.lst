@@ -1,5 +1,6 @@
 com\openmanus\demo\studyplan\config\StudyPlanAgentConfiguration.class
 com\openmanus\demo\studyplan\intent\StudyPlanIntentRecognizer.class
 com\openmanus\demo\studyplan\StudyPlanDemoApplication.class
+com\openmanus\demo\studyplan\config\StudyPlanRagConfiguration.class
 com\openmanus\demo\studyplan\tool\LearningPlanTools.class
 com\openmanus\demo\studyplan\summary\StudyWorkflowSummaryFormatter.class

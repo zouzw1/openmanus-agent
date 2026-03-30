@@ -1,5 +1,7 @@
 package com.openmanus.saa.service;
 
+import com.alibaba.cloud.ai.graph.OverAllState;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openmanus.saa.agent.AgentDefinition;
@@ -41,6 +43,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -66,7 +69,21 @@ public class WorkflowService {
     private static final int EXECUTION_REMAINING_STEP_LIMIT = 3;
     private static final int STEP_RESULT_SUMMARY_LIMIT = 280;
     private static final int PARAMETER_CONTEXT_VALUE_LIMIT = 240;
-    private static final int DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES = 1;
+    static final int DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES = 1;
+    private static final String GRAPH_RESPONSE_KEY = "workflowResponse";
+    private static final String GRAPH_PENDING_FEEDBACK_KEY = "pendingFeedback";
+    private static final String GRAPH_INTENT_RESOLUTION_KEY = "intentResolution";
+    private static final String GRAPH_PLAN_ID_KEY = "planId";
+    private static final String GRAPH_WORKFLOW_STEPS_KEY = "workflowSteps";
+    private static final String GRAPH_FAILED_STEP_KEY = "failedStep";
+    private static final String GRAPH_RESPONSE_MODE_KEY = "responseMode";
+    private static final String GRAPH_START_INDEX_KEY = "startIndex";
+    private static final String GRAPH_OUTPUT_EVALUATION_RESULT_KEY = "outputEvaluationResult";
+    private static final String GRAPH_OUTPUT_EVALUATION_DECISION_KEY = "outputEvaluationDecision";
+    private static final String GRAPH_OUTPUT_EVALUATION_RETRY_COUNT_KEY = "outputEvaluationRetryCount";
+    private static final String GRAPH_CURRENT_STEP_INDEX_KEY = "currentStepIndex";
+    private static final String GRAPH_EXECUTED_STEP_COUNT_KEY = "executedStepCount";
+    private static final String GRAPH_LOOP_CONTINUE_KEY = "loopContinue";
 
     private final ChatClient chatClient;
     private final PlanningService planningService;
@@ -82,6 +99,9 @@ public class WorkflowService {
     private final List<WorkflowSummaryFormatter> workflowSummaryFormatters;
     private final Path workspaceRoot;
     private final ObjectMapper objectMapper;
+    private final WorkflowGraphOrchestrator graphOrchestrator;
+    private final WorkflowLifecycleNodeHandler lifecycleNodeHandler;
+    private final WorkflowStepExecutionHandler stepExecutionHandler;
 
     public WorkflowService(
             ChatClient chatClient,
@@ -114,6 +134,9 @@ public class WorkflowService {
         this.workflowSummaryFormatters = List.copyOf(orderedFormatters);
         this.workspaceRoot = Paths.get(properties.getWorkspace()).toAbsolutePath().normalize();
         this.objectMapper = new ObjectMapper();
+        this.graphOrchestrator = new WorkflowGraphOrchestrator(this);
+        this.lifecycleNodeHandler = new WorkflowLifecycleNodeHandler(this);
+        this.stepExecutionHandler = new WorkflowStepExecutionHandler(this);
         this.agentExecutors = new LinkedHashMap<>();
         for (SpecialistAgent agent : agentExecutors) {
             this.agentExecutors.put(agent.name(), agent);
@@ -125,30 +148,21 @@ public class WorkflowService {
     }
 
     public WorkflowExecutionResponse execute(String sessionId, String objective, IntentResolution providedIntentResolution) {
-        SessionState session = sessionMemoryService.getOrCreate(sessionId);
-        String resolvedSessionId = session.getSessionId();
-
-        Optional<HumanFeedbackRequest> pendingFeedback = sessionMemoryService.getPendingFeedback(resolvedSessionId);
-        if (pendingFeedback.isPresent()) {
-            log.info("Session {} still waiting for human feedback", resolvedSessionId);
-            return createPausedResponse(
-                    pendingFeedback.get().getObjective(),
-                    resolveWorkflowSteps(pendingFeedback.get()),
-                    pendingFeedback.get()
+        String resolvedSessionId = sessionMemoryService.getOrCreate(sessionId).getSessionId();
+        String executionId = UUID.randomUUID().toString();
+        if (!sessionMemoryService.tryStartWorkflowExecution(resolvedSessionId, executionId)) {
+            String message = ResponseLanguageHelper.choose(
+                    objective,
+                    "当前会话已有工作流正在执行，请等待其完成后再重试，或更换新的 sessionId。",
+                    "A workflow is already running for this session. Wait for it to finish or use a new sessionId."
             );
+            return createPlanningFailureResponse(objective, message, List.of());
         }
-
-        IntentResolution intentResolution = providedIntentResolution == null
-                ? intentResolutionService.resolve(objective, session)
-                : providedIntentResolution;
-        ResponseMode responseMode = resolveResponseMode(intentResolution, session);
-        if (responseMode != null) {
-            session.setLatestResponseMode(responseMode);
-            session.addExecutionLog("Response mode resolved: " + responseMode);
+        try {
+            return graphOrchestrator.invokeExecutionEntryGraph(resolvedSessionId, objective, providedIntentResolution);
+        } finally {
+            sessionMemoryService.finishWorkflowExecution(resolvedSessionId, executionId);
         }
-        session.addExecutionLog("Intent resolved: " + intentResolution.intentId() + " -> " + intentResolution.routeMode());
-        session.addMessage("user", objective);
-        return executeNewPlan(resolvedSessionId, objective, intentResolution);
     }
 
     public AgentResponse executeAsAgentResponse(String sessionId, String objective) {
@@ -164,83 +178,182 @@ public class WorkflowService {
     }
 
     public WorkflowExecutionResponse submitHumanFeedback(String sessionId, HumanFeedbackResponse feedback) {
-        HumanFeedbackRequest pendingFeedback = sessionMemoryService.getPendingFeedback(sessionId)
-                .orElseThrow(() -> new IllegalStateException("No pending workflow feedback found for session: " + sessionId));
-
-        sessionMemoryService.processFeedback(sessionId, feedback);
-
-        if (feedback.isReplanRequired()) {
-            String updatedObjective = feedback.getUpdatedObjective();
-            if (updatedObjective == null || updatedObjective.isBlank()) {
-                updatedObjective = pendingFeedback.getObjective();
-            }
-            log.info(
-                    "Replanning workflow for session {} after human feedback. Old objective='{}', new objective='{}'",
-                    sessionId,
-                    pendingFeedback.getObjective(),
-                    updatedObjective
-            );
-            return executeNewPlan(sessionId, updatedObjective, null);
-        }
-
-        return switch (feedback.getAction()) {
-            case ABORT_PLAN -> abortPlan(sessionId, pendingFeedback);
-            case SKIP_STEP -> skipCurrentStep(sessionId, pendingFeedback);
-            case RETRY, PROVIDE_INFO, MODIFY_AND_RETRY -> continueExecution(
-                    sessionId,
-                    pendingFeedback.getObjective(),
-                    pendingFeedback.getPlanId(),
-                    copyWorkflowSteps(resolveWorkflowSteps(pendingFeedback)),
-                    pendingFeedback.getStepIndex()
-            );
-        };
+        return graphOrchestrator.invokeFeedbackEntryGraph(sessionId, feedback);
     }
 
     public AgentResponse submitHumanFeedbackAsAgentResponse(String sessionId, HumanFeedbackResponse feedback) {
         return toAgentResponse(submitHumanFeedback(sessionId, feedback));
     }
 
-    private WorkflowExecutionResponse executeNewPlan(String sessionId, String objective, IntentResolution intentResolution) {
-        List<WorkflowStep> steps;
-        List<AgentCapabilitySnapshot> agentSnapshots = agentCapabilitySnapshotService
-                .listPlanningVisibleSnapshots(properties.isWorkflowUseDataAnalysisAgent());
-        try {
-            steps = planningService.createWorkflowPlan(objective, agentSnapshots, intentResolution);
-        } catch (PlanningService.PlanValidationException ex) {
-            log.warn("Workflow planning failed validation for session {}: {}", sessionId, ex.getMessage());
-            return createPlanningFailureResponse(objective, ex.getMessage(), ex.getPlannedSteps());
+    SessionMemoryService sessionMemoryService() {
+        return sessionMemoryService;
+    }
+
+    PlanningService planningService() {
+        return planningService;
+    }
+
+    PlanningTools planningTools() {
+        return planningTools;
+    }
+
+    OpenManusProperties properties() {
+        return properties;
+    }
+
+    AgentCapabilitySnapshotService agentCapabilitySnapshotService() {
+        return agentCapabilitySnapshotService;
+    }
+
+    IntentResolutionService intentResolutionService() {
+        return intentResolutionService;
+    }
+
+    Map<String, Object> checkPendingFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.checkPendingFeedbackNode(state);
+    }
+
+    Map<String, Object> returnPausedNode(OverAllState state) {
+        return lifecycleNodeHandler.returnPausedNode(state);
+    }
+
+    Map<String, Object> resolveAndExecuteNode(OverAllState state) {
+        return lifecycleNodeHandler.resolveAndExecuteNode(state);
+    }
+
+    Map<String, Object> loadPendingFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.loadPendingFeedbackNode(state);
+    }
+
+    String selectFeedbackTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectFeedbackTransition(state);
+    }
+
+    Map<String, Object> replanFromFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.replanFromFeedbackNode(state);
+    }
+
+    Map<String, Object> abortFromFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.abortFromFeedbackNode(state);
+    }
+
+    Map<String, Object> skipFromFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.skipFromFeedbackNode(state);
+    }
+
+    Map<String, Object> continueFromFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.continueFromFeedbackNode(state);
+    }
+
+    WorkflowExecutionResponse executeNewPlan(String sessionId, String objective, IntentResolution intentResolution) {
+        return graphOrchestrator.invokeNewPlanGraph(sessionId, objective, intentResolution);
+    }
+
+    Map<String, Object> createPlanContextNode(OverAllState state) {
+        return lifecycleNodeHandler.createPlanContextNode(state);
+    }
+
+    Map<String, Object> executePlannedStepsNode(OverAllState state) {
+        return lifecycleNodeHandler.executePlannedStepsNode(state);
+    }
+
+    WorkflowExecutionResponse continueExecution(
+            String sessionId,
+            String objective,
+            String planId,
+            List<WorkflowStep> workflowSteps,
+            int fromIndex
+    ) {
+        return graphOrchestrator.invokeContinueExecutionGraph(
+                sessionId,
+                objective,
+                planId,
+                workflowSteps,
+                fromIndex,
+                resolveResponseMode(sessionMemoryService.getOrCreate(sessionId))
+        );
+    }
+
+    Map<String, Object> executeContinuationStepsNode(OverAllState state) {
+        return lifecycleNodeHandler.executeContinuationStepsNode(state);
+    }
+
+    Map<String, Object> buildPostExecutionState(
+            String sessionId,
+            String objective,
+            String planId,
+            List<WorkflowStep> steps,
+            ResponseMode responseMode
+    ) {
+        Optional<Integer> unfinishedIndex = findFirstUnfinishedStepIndex(steps);
+        if (unfinishedIndex.isPresent()) {
+            log.warn(
+                    "Plan {} returned from step execution with unfinished step {}. Attempting one catch-up execution pass.",
+                    planId,
+                    unfinishedIndex.get() + 1
+            );
+            steps = executeStepsWithStatusTracking(sessionId, planId, steps, objective, unfinishedIndex.get());
         }
 
-        String planId = "workflow-" + UUID.randomUUID();
-        planningTools.createPlan(
-                planId,
-                steps.stream().map(step -> "[" + step.agent() + "] " + step.description()).toList()
-        );
-
-        log.info("Created plan {} with {} steps for session {}", planId, steps.size(), sessionId);
-
-        List<WorkflowStep> executedSteps = executeStepsWithStatusTracking(
-                sessionId,
-                planId,
-                steps,
-                objective,
-                0
-        );
         Optional<HumanFeedbackRequest> pendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
         if (pendingFeedback.isPresent()) {
             log.warn("Plan {} paused - waiting for human intervention", planId);
-            return createPausedResponse(objective, executedSteps, pendingFeedback.get());
+            return Map.of(
+                    "sessionId", sessionId,
+                    "objective", objective,
+                    GRAPH_PLAN_ID_KEY, planId,
+                    GRAPH_WORKFLOW_STEPS_KEY, steps,
+                    GRAPH_RESPONSE_MODE_KEY, responseMode,
+                    GRAPH_PENDING_FEEDBACK_KEY, pendingFeedback.get()
+            );
         }
 
-        Optional<WorkflowStep> failedStep = findFailedStep(executedSteps);
+        Optional<WorkflowStep> failedStep = findFailedStep(steps);
         if (failedStep.isPresent()) {
-            return createFailedResponse(objective, executedSteps, failedStep.get());
+            return Map.of(
+                    "sessionId", sessionId,
+                    "objective", objective,
+                    GRAPH_PLAN_ID_KEY, planId,
+                    GRAPH_WORKFLOW_STEPS_KEY, steps,
+                    GRAPH_RESPONSE_MODE_KEY, responseMode,
+                    GRAPH_FAILED_STEP_KEY, failedStep.get()
+            );
         }
-        ResponseMode responseMode = resolveResponseMode(intentResolution, sessionMemoryService.getOrCreate(sessionId));
-        return finalizeSuccessfulExecution(sessionId, planId, objective, executedSteps, responseMode);
+
+        Optional<Integer> remainingUnfinishedIndex = findFirstUnfinishedStepIndex(steps);
+        if (remainingUnfinishedIndex.isPresent()) {
+            int index = remainingUnfinishedIndex.get();
+            WorkflowStep unfinishedStep = steps.get(index);
+            WorkflowStep failedUnfinishedStep = unfinishedStep.withFailure(
+                    "Workflow execution ended before this planned step ran: " + unfinishedStep.getDescription(),
+                    unfinishedStep.getUsedTools(),
+                    unfinishedStep.getUsedCapabilities(),
+                    unfinishedStep.getArtifacts(),
+                    unfinishedStep.getToolOutputs(),
+                    unfinishedStep.getAttemptCount()
+            );
+            List<WorkflowStep> updatedSteps = new ArrayList<>(steps);
+            updatedSteps.set(index, failedUnfinishedStep);
+            return Map.of(
+                    "sessionId", sessionId,
+                    "objective", objective,
+                    GRAPH_PLAN_ID_KEY, planId,
+                    GRAPH_WORKFLOW_STEPS_KEY, updatedSteps,
+                    GRAPH_RESPONSE_MODE_KEY, responseMode,
+                    GRAPH_FAILED_STEP_KEY, failedUnfinishedStep
+            );
+        }
+
+        return Map.of(
+                "sessionId", sessionId,
+                "objective", objective,
+                GRAPH_PLAN_ID_KEY, planId,
+                GRAPH_WORKFLOW_STEPS_KEY, steps,
+                GRAPH_RESPONSE_MODE_KEY, responseMode
+        );
     }
 
-    private WorkflowExecutionResponse createPlanningFailureResponse(
+    WorkflowExecutionResponse createPlanningFailureResponse(
             String objective,
             String reason,
             List<WorkflowStep> plannedSteps
@@ -271,110 +384,73 @@ public class WorkflowService {
         return createFailedResponse(objective, responseSteps, failedStep);
     }
 
-    private WorkflowExecutionResponse continueExecution(
-            String sessionId,
-            String objective,
-            String planId,
-            List<WorkflowStep> workflowSteps,
-            int fromIndex
-    ) {
-        List<WorkflowStep> allSteps = executeStepsWithStatusTracking(
-                sessionId,
-                planId,
-                workflowSteps,
-                objective,
-                fromIndex
-        );
-
-        Optional<HumanFeedbackRequest> pendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
-        if (pendingFeedback.isPresent()) {
-            return createPausedResponse(objective, allSteps, pendingFeedback.get());
-        }
-
-        Optional<WorkflowStep> failedStep = findFailedStep(allSteps);
-        if (failedStep.isPresent()) {
-            return createFailedResponse(objective, allSteps, failedStep.get());
-        }
-        SessionState session = sessionMemoryService.getOrCreate(sessionId);
-        ResponseMode responseMode = resolveResponseMode(session);
-        return finalizeSuccessfulExecution(sessionId, planId, objective, allSteps, responseMode);
+    String selectPostExecutionTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectPostExecutionTransition(state);
     }
 
-    private WorkflowExecutionResponse finalizeSuccessfulExecution(
+    Map<String, Object> returnGraphResponseNode(OverAllState state) {
+        return lifecycleNodeHandler.returnGraphResponseNode(state);
+    }
+
+    boolean hasGraphResponse(OverAllState state) {
+        return lifecycleNodeHandler.hasGraphResponse(state);
+    }
+
+    Map<String, Object> returnPausedAfterRunNode(OverAllState state) {
+        return lifecycleNodeHandler.returnPausedAfterRunNode(state);
+    }
+
+    Map<String, Object> returnFailedAfterRunNode(OverAllState state) {
+        return lifecycleNodeHandler.returnFailedAfterRunNode(state);
+    }
+
+    Map<String, Object> finalizeSuccessfulRunNode(OverAllState state) {
+        return lifecycleNodeHandler.finalizeSuccessfulRunNode(state);
+    }
+
+    WorkflowExecutionResponse finalizeSuccessfulExecution(
             String sessionId,
             String planId,
             String objective,
             List<WorkflowStep> executedSteps,
             ResponseMode responseMode
     ) {
-        SessionState session = sessionMemoryService.getOrCreate(sessionId);
-        List<WorkflowStep> currentSteps = executedSteps == null ? List.of() : executedSteps;
-        OutputEvaluationResult outputEvaluation = new OutputEvaluationResult(
-                OutputEvaluationStatus.SKIPPED,
-                "",
-                List.of(),
-                null,
-                0,
-                DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES
+        WorkflowExecutionResponse response = graphOrchestrator.invokeOutputEvaluationGraph(
+                sessionId,
+                planId,
+                objective,
+                executedSteps,
+                responseMode
         );
-
-        if (shouldEvaluateOutput(responseMode)) {
-            int retryCount = 0;
-            while (true) {
-                OutputEvaluationDecision decision = evaluateOutput(objective, currentSteps, responseMode);
-                session.addExecutionLog("Output evaluation: " + decision.status() + " | " + decision.message());
-
-                if (decision.status() == OutputEvaluationStatus.PASSED
-                        || decision.status() == OutputEvaluationStatus.MINOR_ISSUES) {
-                    outputEvaluation = decision.toResult(retryCount, DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES, false);
-                    break;
-                }
-
-                if (shouldRetryAfterEvaluation(decision, retryCount)) {
-                    retryCount++;
-                    outputEvaluation = decision.toResult(retryCount, DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES, false);
-                    session.addExecutionLog("Output evaluation requested automatic retry #" + retryCount);
-                    if (decision.revisionPrompt() != null && !decision.revisionPrompt().isBlank()) {
-                        session.addMessage("system", "[OUTPUT_EVALUATION_RETRY] " + decision.revisionPrompt());
-                    }
-                    currentSteps = prepareStepsForOutputRetry(currentSteps, decision, retryCount);
-                    currentSteps = executeStepsWithStatusTracking(
-                            sessionId,
-                            planId,
-                            currentSteps,
-                            objective,
-                            decision.retryStartIndex()
-                    );
-
-                    Optional<HumanFeedbackRequest> pendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
-                    if (pendingFeedback.isPresent()) {
-                        return createPausedResponse(objective, currentSteps, pendingFeedback.get(), outputEvaluation);
-                    }
-
-                    Optional<WorkflowStep> failedStep = findFailedStep(currentSteps);
-                    if (failedStep.isPresent()) {
-                        return createFailedResponse(objective, currentSteps, failedStep.get(), outputEvaluation);
-                    }
-                    continue;
-                }
-
-                if (decision.status() == OutputEvaluationStatus.MAJOR_ISSUES
-                        || (decision.status() == OutputEvaluationStatus.ASK_USER && hasCoreDeliverable(objective, currentSteps))) {
-                    outputEvaluation = decision.toResult(retryCount, DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES, true);
-                    break;
-                }
-
-                outputEvaluation = decision.toResult(retryCount, DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES, true);
-                return createOutputEvaluationFailureResponse(objective, currentSteps, outputEvaluation);
-            }
-        }
-
-        WorkflowExecutionResponse response = createCompletedResponse(objective, currentSteps, responseMode, outputEvaluation);
-        session.addMessage("assistant", response.summary().userMessage());
+        sessionMemoryService.getOrCreate(sessionId).addMessage("assistant", response.summary().userMessage());
         return response;
     }
 
-    private WorkflowExecutionResponse skipCurrentStep(String sessionId, HumanFeedbackRequest pendingFeedback) {
+    Map<String, Object> maybeSkipOutputEvaluationNode(OverAllState state) {
+        return lifecycleNodeHandler.maybeSkipOutputEvaluationNode(state);
+    }
+
+    Map<String, Object> evaluateCurrentOutputNode(OverAllState state) {
+        return lifecycleNodeHandler.evaluateCurrentOutputNode(state);
+    }
+
+    String selectOutputEvaluationTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectOutputEvaluationTransition(state);
+    }
+
+    Map<String, Object> retryOutputWorkflowNode(OverAllState state) {
+        return lifecycleNodeHandler.retryOutputWorkflowNode(state);
+    }
+
+    Map<String, Object> completeWithCurrentOutputNode(OverAllState state) {
+        return lifecycleNodeHandler.completeWithCurrentOutputNode(state);
+    }
+
+    Map<String, Object> failFromOutputEvaluationNode(OverAllState state) {
+        return lifecycleNodeHandler.failFromOutputEvaluationNode(state);
+    }
+
+    WorkflowExecutionResponse skipCurrentStep(String sessionId, HumanFeedbackRequest pendingFeedback) {
         List<WorkflowStep> workflowSteps = copyWorkflowSteps(resolveWorkflowSteps(pendingFeedback));
         WorkflowStep failedStep = pendingFeedback.getFailedStep();
         String skippedMessage = ResponseLanguageHelper.choose(
@@ -412,7 +488,7 @@ public class WorkflowService {
         );
     }
 
-    private WorkflowExecutionResponse abortPlan(String sessionId, HumanFeedbackRequest pendingFeedback) {
+    WorkflowExecutionResponse abortPlan(String sessionId, HumanFeedbackRequest pendingFeedback) {
         List<WorkflowStep> allSteps = resolveWorkflowSteps(pendingFeedback);
         List<String> executionLog = toExecutionLog(allSteps);
         String baseMessage = ResponseLanguageHelper.choose(
@@ -463,110 +539,21 @@ public class WorkflowService {
         );
     }
 
-    private List<WorkflowStep> executeStepsWithStatusTracking(
+    List<WorkflowStep> executeStepsWithStatusTracking(
             String sessionId,
             String planId,
             List<WorkflowStep> workflowSteps,
             String objective,
             int startIndexOffset
     ) {
-        List<WorkflowStep> updatedSteps = copyWorkflowSteps(workflowSteps);
-        int executedCount = 0;
-
-        for (int actualStepIndex = Math.max(0, startIndexOffset);
-             actualStepIndex < updatedSteps.size() && executedCount < properties.getMaxSteps();
-             actualStepIndex++) {
-            WorkflowStep step = updatedSteps.get(actualStepIndex);
-            if (step.getStatus().isTerminal()) {
-                continue;
-            }
-            log.info("Executing step {}: {}", actualStepIndex + 1, step.getDescription());
-
-            Map<String, Object> executionParameterContext = resolveExecutionParameterContext(updatedSteps, actualStepIndex, step);
-
-            WorkflowStep inProgressStep = new WorkflowStep(
-                    step.getAgent(),
-                    step.getDescription(),
-                    step.getRequiredTools(),
-                    step.getUsedTools(),
-                    executionParameterContext,
-                    StepStatus.IN_PROGRESS,
-                    null,
-                    LocalDateTime.now(),
-                    null,
-                    null,
-                    step.getAttemptCount(),
-                    false
-            );
-
-            AgentDefinition agentDefinition = resolveAgentDefinition(step.getAgent());
-            SpecialistAgent agent = selectExecutor(agentDefinition);
-                ExecutionResult executionResult = executeStepWithRetry(
-                        sessionId,
-                        planId,
-                        actualStepIndex,
-                        inProgressStep,
-                        agentDefinition,
-                        agent,
-                        objective,
-                        updatedSteps,
-                        buildExecutionContext(sessionId, updatedSteps, actualStepIndex)
-                );
-
-            WorkflowStep completedStep;
-            List<String> displayUsedTools = buildDisplayUsedTools(executionResult.usedTools, executionResult.usedToolCalls);
-            List<String> resolvedArtifacts = resolveStepArtifacts(inProgressStep, executionResult.usedToolCalls, executionResult.artifacts);
-            if (executionResult.success) {
-                completedStep = inProgressStep.withResult(
-                        executionResult.result,
-                        executionResult.usedTools,
-                        displayUsedTools,
-                        resolvedArtifacts,
-                        executionResult.toolOutputs
-                );
-                updatedSteps.set(actualStepIndex, completedStep);
-                log.info("Step {} completed successfully", actualStepIndex + 1);
-            } else if (executionResult.needsHumanFeedback) {
-                completedStep = inProgressStep.withHumanFeedbackNeeded(
-                        executionResult.error,
-                        executionResult.usedTools,
-                        displayUsedTools,
-                        resolvedArtifacts,
-                        executionResult.toolOutputs
-                );
-                updatedSteps.set(actualStepIndex, completedStep);
-                HumanFeedbackRequest feedbackRequest = createHumanFeedbackRequest(
-                        sessionId,
-                        objective,
-                        planId,
-                        actualStepIndex,
-                        completedStep,
-                        List.copyOf(updatedSteps),
-                        executionResult.error
-                );
-                sessionMemoryService.savePendingFeedback(sessionId, feedbackRequest);
-                log.warn("Step {} requires human intervention. Plan paused.", actualStepIndex + 1);
-                break;
-            } else {
-                completedStep = inProgressStep.withFailure(
-                        executionResult.error,
-                        executionResult.usedTools,
-                        displayUsedTools,
-                        resolvedArtifacts,
-                        executionResult.toolOutputs,
-                        executionResult.attempts
-                );
-                updatedSteps.set(actualStepIndex, completedStep);
-                break;
-            }
-
-            executedCount++;
-        }
-
-        return updatedSteps;
+        return graphOrchestrator.invokeStepExecutionGraph(sessionId, planId, workflowSteps, objective, startIndexOffset);
     }
 
-    private ExecutionResult executeStepWithRetry(
+    Map<String, Object> executeSingleStepNode(OverAllState state) {
+        return stepExecutionHandler.executeSingleStepNode(state);
+    }
+
+    ExecutionResult executeStepWithRetry(
             String sessionId,
             String planId,
             int stepIndex,
@@ -592,6 +579,11 @@ public class WorkflowService {
             log.debug("Step {} attempt {}/{}", stepIndex + 1, attempt, maxAttempts);
 
             try {
+                ExecutionResult directWorkspaceWrite = tryExecuteDirectWorkspaceWrite(effectiveStep, attempt);
+                if (directWorkspaceWrite != null) {
+                    return directWorkspaceWrite;
+                }
+
                 SkillLoadResult skillLoadResult = loadDeclaredSkill(effectiveStep);
                 if (skillLoadResult.error != null) {
                     return new ExecutionResult(false, null, skillLoadResult.usedTools, skillLoadResult.usedToolCalls, List.of(), List.of(), false, skillLoadResult.error, attempt);
@@ -769,6 +761,63 @@ public class WorkflowService {
         return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
     }
 
+    private ExecutionResult tryExecuteDirectWorkspaceWrite(WorkflowStep step, int attempt) {
+        if (!isDirectWorkspaceWriteStep(step)) {
+            return null;
+        }
+        Map<String, Object> parameters = step.getParameterContext();
+        Object relativePathValue = parameters.get("relativePath");
+        Object contentValue = parameters.get("content");
+        if (!(relativePathValue instanceof String relativePath) || relativePath.isBlank()) {
+            return null;
+        }
+        if (!(contentValue instanceof String content) || content.isBlank()) {
+            return null;
+        }
+        try {
+            Path target = resolveWorkspacePath(relativePath);
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, content, java.nio.charset.StandardCharsets.UTF_8);
+                return new ExecutionResult(
+                        true,
+                        "Wrote file: " + normalizeWorkspaceRelativePath(relativePath),
+                        List.of("writeWorkspaceFile"),
+                        List.of(),
+                        List.of(target.toString()),
+                        List.of("writeWorkspaceFile|\"Wrote file: " + normalizeWorkspaceRelativePath(relativePath).replace("\\", "\\\\") + "\""),
+                        false,
+                        null,
+                        attempt
+                );
+        } catch (Exception ex) {
+            return new ExecutionResult(
+                    false,
+                    null,
+                    List.of("writeWorkspaceFile"),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    false,
+                    "Failed to write workspace file directly: " + ex.getMessage(),
+                    attempt
+            );
+        }
+    }
+
+    private boolean isDirectWorkspaceWriteStep(WorkflowStep step) {
+        if (step == null || step.getParameterContext() == null) {
+            return false;
+        }
+        if (declaredSkillName(step) != null) {
+            return false;
+        }
+        List<String> requiredTools = step.getRequiredTools() == null ? List.of() : step.getRequiredTools();
+        if (!requiredTools.contains("writeWorkspaceFile")) {
+            return false;
+        }
+        return requiredTools.size() == 1;
+    }
+
     private String buildStepExecutionPrompt(
             WorkflowStep step,
             int attempt,
@@ -932,10 +981,10 @@ public class WorkflowService {
         );
     }
 
-    private boolean agentAllowsLocalTool(AgentDefinition agentDefinition, String toolName) {
+    boolean agentAllowsLocalTool(AgentDefinition agentDefinition, String toolName) {
         return agentDefinition != null
                 && agentDefinition.getLocalTools() != null
-                && agentDefinition.getLocalTools().allows("tool:" + toolName);
+                && agentDefinition.getLocalTools().allows(toolName);
     }
 
     private boolean enrichLazySkillExecutionParameters(
@@ -1270,7 +1319,7 @@ public class WorkflowService {
         return List.copyOf(merged);
     }
 
-    private List<String> buildDisplayUsedTools(List<String> usedTools, List<String> usedToolCalls) {
+    List<String> buildDisplayUsedTools(List<String> usedTools, List<String> usedToolCalls) {
         LinkedHashSet<String> displayNames = new LinkedHashSet<>();
         if (usedToolCalls != null) {
             for (String detail : usedToolCalls) {
@@ -1353,7 +1402,7 @@ public class WorkflowService {
         return displayName.startsWith("mcp:") || displayName.startsWith("skill:");
     }
 
-    private List<String> resolveStepArtifacts(WorkflowStep step, List<String> usedToolCalls, List<String> outcomeArtifacts) {
+    List<String> resolveStepArtifacts(WorkflowStep step, List<String> usedToolCalls, List<String> outcomeArtifacts) {
         LinkedHashSet<String> artifacts = new LinkedHashSet<>();
         if (outcomeArtifacts != null) {
             outcomeArtifacts.stream()
@@ -1410,7 +1459,7 @@ public class WorkflowService {
     }
 
     private String validateWrittenWorkspaceFile(WorkflowStep step, List<String> usedToolCalls, StepOutcome outcome) {
-        if (writesOfficeDocument(step)) {
+        if (writesOfficeDocument(step, usedToolCalls)) {
             return "writeWorkspaceFile must not be used to directly write Office deliverables such as .docx, .pdf, or .pptx. "
                     + "Generate the Office file through the export capability itself and keep writeWorkspaceFile limited to text drafts.";
         }
@@ -1439,7 +1488,11 @@ public class WorkflowService {
         return null;
     }
 
-    private boolean writesOfficeDocument(WorkflowStep step) {
+    private boolean writesOfficeDocument(WorkflowStep step, List<String> usedToolCalls) {
+        List<String> explicitWritePaths = resolveWriteWorkspaceToolPaths(usedToolCalls);
+        if (!explicitWritePaths.isEmpty()) {
+            return explicitWritePaths.stream().anyMatch(this::isOfficeDocumentPath);
+        }
         if (step == null || step.getParameterContext() == null) {
             return false;
         }
@@ -1447,7 +1500,14 @@ public class WorkflowService {
         if (!(relativePathValue instanceof String relativePath) || relativePath.isBlank()) {
             return false;
         }
-        String normalized = relativePath.toLowerCase();
+        return isOfficeDocumentPath(relativePath);
+    }
+
+    private boolean isOfficeDocumentPath(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return false;
+        }
+        String normalized = relativePath.toLowerCase(Locale.ROOT);
         return normalized.endsWith(".docx")
                 || normalized.endsWith(".pdf")
                 || normalized.endsWith(".pptx");
@@ -1456,7 +1516,10 @@ public class WorkflowService {
     private List<String> resolveOutputArtifactPaths(WorkflowStep step, List<String> usedToolCalls, StepOutcome outcome) {
         LinkedHashSet<String> paths = new LinkedHashSet<>();
 
-        if (step != null && step.getParameterContext() != null) {
+        List<String> explicitWritePaths = resolveWriteWorkspaceToolPaths(usedToolCalls);
+        paths.addAll(explicitWritePaths);
+
+        if (paths.isEmpty() && step != null && step.getParameterContext() != null) {
             Object relativePathValue = step.getParameterContext().get("relativePath");
             if (relativePathValue instanceof String relativePath && !relativePath.isBlank()) {
                 paths.add(relativePath.trim());
@@ -1470,31 +1533,36 @@ public class WorkflowService {
                     .forEach(paths::add);
         }
 
-        if (usedToolCalls != null) {
-            for (String detail : usedToolCalls) {
-                if (detail == null || detail.isBlank() || !detail.startsWith("writeWorkspaceFile|")) {
-                    continue;
-                }
-                int separator = detail.indexOf('|');
-                if (separator < 0 || separator >= detail.length() - 1) {
-                    continue;
-                }
-                String jsonPayload = detail.substring(separator + 1).trim();
-                try {
-                    JsonNode payload = objectMapper.readTree(jsonPayload);
-                    JsonNode relativePathNode = payload.get("relativePath");
-                    if (relativePathNode != null) {
-                        String relativePath = relativePathNode.asText("").trim();
-                        if (!relativePath.isBlank()) {
-                            paths.add(relativePath);
-                        }
+        return List.copyOf(paths);
+    }
+
+    private List<String> resolveWriteWorkspaceToolPaths(List<String> usedToolCalls) {
+        LinkedHashSet<String> paths = new LinkedHashSet<>();
+        if (usedToolCalls == null) {
+            return List.of();
+        }
+        for (String detail : usedToolCalls) {
+            if (detail == null || detail.isBlank() || !detail.startsWith("writeWorkspaceFile|")) {
+                continue;
+            }
+            int separator = detail.indexOf('|');
+            if (separator < 0 || separator >= detail.length() - 1) {
+                continue;
+            }
+            String jsonPayload = detail.substring(separator + 1).trim();
+            try {
+                JsonNode payload = objectMapper.readTree(jsonPayload);
+                JsonNode relativePathNode = payload.get("relativePath");
+                if (relativePathNode != null) {
+                    String relativePath = relativePathNode.asText("").trim();
+                    if (!relativePath.isBlank()) {
+                        paths.add(relativePath);
                     }
-                } catch (Exception ignored) {
-                    log.debug("Failed to parse writeWorkspaceFile invocation detail: {}", detail);
                 }
+            } catch (Exception ignored) {
+                log.debug("Failed to parse writeWorkspaceFile invocation detail: {}", detail);
             }
         }
-
         return List.copyOf(paths);
     }
 
@@ -1508,7 +1576,7 @@ public class WorkflowService {
         return target;
     }
 
-    private String buildExecutionContext(String sessionId, List<WorkflowStep> workflowSteps, int currentStepIndex) {
+    String buildExecutionContext(String sessionId, List<WorkflowStep> workflowSteps, int currentStepIndex) {
         StringBuilder context = new StringBuilder();
         context.append("Workflow execution context:\n");
         context.append("- Current step index: ").append(currentStepIndex + 1).append(" / ").append(workflowSteps.size()).append("\n");
@@ -1561,7 +1629,7 @@ public class WorkflowService {
         return context.toString().trim();
     }
 
-    private Map<String, Object> resolveExecutionParameterContext(
+    Map<String, Object> resolveExecutionParameterContext(
             List<WorkflowStep> workflowSteps,
             int currentStepIndex,
             WorkflowStep step
@@ -1571,8 +1639,8 @@ public class WorkflowService {
                 : step.getParameterContext();
         Map<String, Object> resolvedContext = new LinkedHashMap<>(baseContext);
 
-        String latestReusableText = resolveLatestReusableTextPayload(workflowSteps, currentStepIndex);
-        if (latestReusableText == null || latestReusableText.isBlank()) {
+        String reusableText = resolveReusableTextPayload(workflowSteps, currentStepIndex, step);
+        if (reusableText == null || reusableText.isBlank()) {
             return resolvedContext;
         }
 
@@ -1580,7 +1648,7 @@ public class WorkflowService {
         for (String parameterName : List.of("content", "text", "body", "markdown", "html")) {
             Object value = resolvedContext.get(parameterName);
             if (value instanceof String textValue && textValue.isBlank()) {
-                resolvedContext.put(parameterName, latestReusableText);
+                resolvedContext.put(parameterName, reusableText);
                 updated = true;
             }
         }
@@ -1825,7 +1893,7 @@ public class WorkflowService {
                 || normalized.contains("\u65e0\u6548");
     }
 
-    private HumanFeedbackRequest createHumanFeedbackRequest(
+    HumanFeedbackRequest createHumanFeedbackRequest(
             String sessionId,
             String objective,
             String planId,
@@ -1987,7 +2055,7 @@ public class WorkflowService {
         return result;
     }
 
-    private WorkflowExecutionResponse createPausedResponse(
+    WorkflowExecutionResponse createPausedResponse(
             String objective,
             List<WorkflowStep> executedSteps,
             HumanFeedbackRequest pendingFeedback
@@ -1995,7 +2063,7 @@ public class WorkflowService {
         return createPausedResponse(objective, executedSteps, pendingFeedback, null);
     }
 
-    private WorkflowExecutionResponse createPausedResponse(
+    WorkflowExecutionResponse createPausedResponse(
             String objective,
             List<WorkflowStep> executedSteps,
             HumanFeedbackRequest pendingFeedback,
@@ -2064,7 +2132,7 @@ public class WorkflowService {
         );
     }
 
-    private WorkflowExecutionResponse createFailedResponse(
+    WorkflowExecutionResponse createFailedResponse(
             String objective,
             List<WorkflowStep> executedSteps,
             WorkflowStep failedStep
@@ -2072,7 +2140,7 @@ public class WorkflowService {
         return createFailedResponse(objective, executedSteps, failedStep, null);
     }
 
-    private WorkflowExecutionResponse createFailedResponse(
+    WorkflowExecutionResponse createFailedResponse(
             String objective,
             List<WorkflowStep> executedSteps,
             WorkflowStep failedStep,
@@ -2115,7 +2183,7 @@ public class WorkflowService {
         return new WorkflowExecutionResponse(objective, executedSteps, artifacts, executionLog, summary, null, outputEvaluation);
     }
 
-    private WorkflowExecutionResponse createCompletedResponse(
+    WorkflowExecutionResponse createCompletedResponse(
             String objective,
             List<WorkflowStep> executedSteps,
             ResponseMode responseMode,
@@ -2153,7 +2221,7 @@ public class WorkflowService {
         );
     }
 
-    private WorkflowExecutionResponse createOutputEvaluationFailureResponse(
+    WorkflowExecutionResponse createOutputEvaluationFailureResponse(
             String objective,
             List<WorkflowStep> executedSteps,
             OutputEvaluationResult outputEvaluation
@@ -2290,10 +2358,26 @@ public class WorkflowService {
         );
     }
 
-    private Optional<WorkflowStep> findFailedStep(List<WorkflowStep> steps) {
+    Optional<WorkflowStep> findFailedStep(List<WorkflowStep> steps) {
         return steps.stream()
                 .filter(step -> step.getStatus() == StepStatus.FAILED)
                 .findFirst();
+    }
+
+    Optional<Integer> findFirstUnfinishedStepIndex(List<WorkflowStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return Optional.empty();
+        }
+        for (int i = 0; i < steps.size(); i++) {
+            WorkflowStep step = steps.get(i);
+            if (step == null) {
+                continue;
+            }
+            if (!step.getStatus().isTerminal() && !step.getStatus().needsHumanIntervention()) {
+                return Optional.of(i);
+            }
+        }
+        return Optional.empty();
     }
 
     private String formatWorkflowExecutionMarkdown(
@@ -2473,15 +2557,80 @@ public class WorkflowService {
         return steps;
     }
 
-    private List<WorkflowStep> resolveWorkflowSteps(HumanFeedbackRequest pendingFeedback) {
+    List<WorkflowStep> resolveWorkflowSteps(HumanFeedbackRequest pendingFeedback) {
         if (pendingFeedback.getSteps() != null && !pendingFeedback.getSteps().isEmpty()) {
             return copyWorkflowSteps(pendingFeedback.getSteps());
         }
         return collectPausedSteps(pendingFeedback);
     }
 
-    private List<WorkflowStep> copyWorkflowSteps(List<WorkflowStep> steps) {
+    List<WorkflowStep> copyWorkflowSteps(List<WorkflowStep> steps) {
         return new ArrayList<>(steps);
+    }
+
+    List<WorkflowStep> coerceWorkflowSteps(Object rawSteps) {
+        if (rawSteps == null) {
+            return List.of();
+        }
+        if (rawSteps instanceof List<?> items) {
+            if (items.isEmpty()) {
+                return List.of();
+            }
+            if (items.get(0) instanceof WorkflowStep) {
+                @SuppressWarnings("unchecked")
+                List<WorkflowStep> typedSteps = (List<WorkflowStep>) items;
+                return copyWorkflowSteps(typedSteps);
+            }
+        }
+        try {
+            JavaType listType = objectMapper.getTypeFactory().constructCollectionType(List.class, WorkflowStep.class);
+            List<WorkflowStep> converted = objectMapper.convertValue(rawSteps, listType);
+            return copyWorkflowSteps(converted);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Failed to coerce workflow steps from graph state", ex);
+        }
+    }
+
+    WorkflowStep coerceWorkflowStep(Object rawStep) {
+        if (rawStep == null) {
+            return null;
+        }
+        if (rawStep instanceof WorkflowStep workflowStep) {
+            return workflowStep;
+        }
+        try {
+            return objectMapper.convertValue(rawStep, WorkflowStep.class);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Failed to coerce workflow step from graph state", ex);
+        }
+    }
+
+    HumanFeedbackRequest coerceHumanFeedbackRequest(Object rawRequest) {
+        if (rawRequest == null) {
+            return null;
+        }
+        if (rawRequest instanceof HumanFeedbackRequest request) {
+            return request;
+        }
+        try {
+            return objectMapper.convertValue(rawRequest, HumanFeedbackRequest.class);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Failed to coerce human feedback request from graph state", ex);
+        }
+    }
+
+    WorkflowExecutionResponse coerceWorkflowExecutionResponse(Object rawResponse) {
+        if (rawResponse == null) {
+            return null;
+        }
+        if (rawResponse instanceof WorkflowExecutionResponse response) {
+            return response;
+        }
+        try {
+            return objectMapper.convertValue(rawResponse, WorkflowExecutionResponse.class);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Failed to coerce workflow execution response from graph state", ex);
+        }
     }
 
     private List<String> toExecutionLog(List<WorkflowStep> steps) {
@@ -2702,21 +2851,51 @@ public class WorkflowService {
         return null;
     }
 
-    private String resolveLatestReusableTextPayload(List<WorkflowStep> workflowSteps, int currentStepIndex) {
+    private String resolveReusableTextPayload(List<WorkflowStep> workflowSteps, int currentStepIndex, WorkflowStep currentStep) {
         if (workflowSteps == null || workflowSteps.isEmpty()) {
             return null;
         }
-        for (int i = Math.min(currentStepIndex - 1, workflowSteps.size() - 1); i >= 0; i--) {
+
+        List<String> payloads = new ArrayList<>();
+        for (int i = 0; i < Math.min(currentStepIndex, workflowSteps.size()); i++) {
             WorkflowStep candidate = workflowSteps.get(i);
             if (candidate == null || !candidate.isCompleted()) {
                 continue;
             }
             String payload = extractReusableTextPayload(candidate);
             if (payload != null && !payload.isBlank()) {
-                return payload;
+                payloads.add(payload.trim());
             }
         }
-        return null;
+        if (payloads.isEmpty()) {
+            return null;
+        }
+        if (payloads.size() == 1 || !stepLikelyNeedsMergedText(currentStep)) {
+            return payloads.get(payloads.size() - 1);
+        }
+        return joinReusableTextPayloads(payloads);
+    }
+
+    private boolean stepLikelyNeedsMergedText(WorkflowStep step) {
+        if (step == null || step.getDescription() == null) {
+            return false;
+        }
+        String description = step.getDescription().toLowerCase(Locale.ROOT);
+        return description.contains("合并")
+                || description.contains("merge")
+                || description.contains("整合")
+                || description.contains("整理")
+                || description.contains("汇总");
+    }
+
+    private String joinReusableTextPayloads(List<String> payloads) {
+        LinkedHashSet<String> uniquePayloads = new LinkedHashSet<>();
+        for (String payload : payloads) {
+            if (payload != null && !payload.isBlank()) {
+                uniquePayloads.add(payload.trim());
+            }
+        }
+        return String.join("\n\n", uniquePayloads);
     }
 
     private String extractReusableTextPayload(WorkflowStep step) {
@@ -2834,7 +3013,7 @@ public class WorkflowService {
         return text.substring(0, maxLength).trim() + "...";
     }
 
-    private boolean shouldEvaluateOutput(ResponseMode responseMode) {
+    boolean shouldEvaluateOutput(ResponseMode responseMode) {
         return responseMode == ResponseMode.FINAL_DELIVERABLE || responseMode == ResponseMode.HYBRID;
     }
 
@@ -2915,7 +3094,7 @@ public class WorkflowService {
         return summary.toString();
     }
 
-    private OutputEvaluationDecision evaluateOutput(
+    OutputEvaluationDecision evaluateOutput(
             String objective,
             List<WorkflowStep> completedSteps,
             ResponseMode responseMode
@@ -3035,13 +3214,13 @@ public class WorkflowService {
         }
     }
 
-    private List<WorkflowStep> prepareStepsForOutputRetry(
+    List<WorkflowStep> prepareStepsForOutputRetry(
             List<WorkflowStep> workflowSteps,
             OutputEvaluationDecision evaluationDecision,
             int evaluationRetryCount
     ) {
         List<WorkflowStep> updatedSteps = new ArrayList<>(workflowSteps);
-        int retryStartIndex = Math.max(0, Math.min(evaluationDecision.retryStartIndex(), Math.max(0, workflowSteps.size() - 1)));
+        int retryStartIndex = clampRetryStartIndex(workflowSteps, evaluationDecision.retryStartIndex());
         for (int i = retryStartIndex; i < updatedSteps.size(); i++) {
             WorkflowStep originalStep = updatedSteps.get(i);
             Map<String, Object> parameterContext = new LinkedHashMap<>();
@@ -3066,6 +3245,13 @@ public class WorkflowService {
         return updatedSteps;
     }
 
+    int clampRetryStartIndex(List<WorkflowStep> workflowSteps, int retryStartIndex) {
+        if (workflowSteps == null || workflowSteps.isEmpty()) {
+            return 0;
+        }
+        return Math.max(0, Math.min(retryStartIndex, workflowSteps.size() - 1));
+    }
+
     private String safeForPrompt(String text) {
         if (text == null || text.isBlank()) {
             return "none";
@@ -3073,7 +3259,7 @@ public class WorkflowService {
         return truncateForContext(text, 2000);
     }
 
-    private boolean shouldRetryAfterEvaluation(OutputEvaluationDecision decision, int retryCount) {
+    boolean shouldRetryAfterEvaluation(OutputEvaluationDecision decision, int retryCount) {
         if (decision == null || retryCount >= DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES) {
             return false;
         }
@@ -3081,7 +3267,7 @@ public class WorkflowService {
                 || decision.status() == OutputEvaluationStatus.BLOCKER;
     }
 
-    private boolean hasCoreDeliverable(String objective, List<WorkflowStep> steps) {
+    boolean hasCoreDeliverable(String objective, List<WorkflowStep> steps) {
         if (steps == null || steps.isEmpty()) {
             return false;
         }
@@ -3147,14 +3333,14 @@ public class WorkflowService {
         };
     }
 
-    private record OutputEvaluationDecision(
+    record OutputEvaluationDecision(
             OutputEvaluationStatus status,
             String message,
             List<String> issues,
             String revisionPrompt,
             int retryStartIndex
     ) {
-        private OutputEvaluationDecision {
+        OutputEvaluationDecision {
             status = status == null ? OutputEvaluationStatus.MAJOR_ISSUES : status;
             message = message == null || message.isBlank() ? "当前结果仍有可优化空间。" : message.trim();
             issues = issues == null ? List.of() : List.copyOf(issues);
@@ -3162,7 +3348,7 @@ public class WorkflowService {
             retryStartIndex = Math.max(0, retryStartIndex);
         }
 
-        private OutputEvaluationResult toResult(int retryCount, int maxRetryCount, boolean terminal) {
+        OutputEvaluationResult toResult(int retryCount, int maxRetryCount, boolean terminal) {
             return new OutputEvaluationResult(
                     status,
                     message,
@@ -3174,7 +3360,7 @@ public class WorkflowService {
         }
     }
 
-    private ResponseMode resolveResponseMode(IntentResolution intentResolution, SessionState session) {
+    ResponseMode resolveResponseMode(IntentResolution intentResolution, SessionState session) {
         ResponseMode responseMode = IntentResolutionHelper.responseMode(intentResolution);
         if (responseMode != null) {
             return responseMode;
@@ -3182,7 +3368,7 @@ public class WorkflowService {
         return resolveResponseMode(session);
     }
 
-    private ResponseMode resolveResponseMode(SessionState session) {
+    ResponseMode resolveResponseMode(SessionState session) {
         if (session == null || session.getLatestResponseMode() == null) {
             return ResponseMode.HYBRID;
         }
@@ -3198,14 +3384,14 @@ public class WorkflowService {
                 .collect(Collectors.joining("\n"));
     }
 
-    private AgentDefinition resolveAgentDefinition(String agentId) {
+    AgentDefinition resolveAgentDefinition(String agentId) {
         if ("data_analysis".equals(agentId) && !properties.isWorkflowUseDataAnalysisAgent()) {
             return agentRegistryService.getEnabled("manus").orElseGet(agentRegistryService::getDefaultChatAgent);
         }
         return agentRegistryService.getEnabled(agentId).orElseGet(agentRegistryService::getDefaultChatAgent);
     }
 
-    private SpecialistAgent selectExecutor(AgentDefinition agentDefinition) {
+    SpecialistAgent selectExecutor(AgentDefinition agentDefinition) {
         SpecialistAgent executor = agentExecutors.get(agentDefinition.getExecutorType());
         if (executor != null) {
             return executor;
@@ -3217,7 +3403,7 @@ public class WorkflowService {
         throw new IllegalStateException("No executor registered for type: " + agentDefinition.getExecutorType());
     }
 
-    private static class ExecutionResult {
+    static class ExecutionResult {
         final boolean success;
         final String result;
         final List<String> usedTools;

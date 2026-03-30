@@ -87,6 +87,7 @@ public class LocalFileAgentConfigSource implements AgentConfigSource {
         IdAccessPolicy localTools = parseIdAccessPolicy(childMap(capabilities, "local-tools"), CapabilityAccessMode.ALLOW_LIST, "tool:");
         IdAccessPolicy skills = parseIdAccessPolicy(childMap(capabilities, "skills"), CapabilityAccessMode.DENY_ALL, "skill:");
         McpAccessPolicy mcp = parseMcpAccessPolicy(childMap(capabilities, "mcp"));
+        AgentRagConfig rag = parseRagConfig(childMap(root, "rag"));
 
         return new AgentDefinition(
                 id,
@@ -100,7 +101,8 @@ public class LocalFileAgentConfigSource implements AgentConfigSource {
                 promptFile,
                 localTools,
                 mcp,
-                skills
+                skills,
+                rag
         );
     }
 
@@ -134,6 +136,25 @@ public class LocalFileAgentConfigSource implements AgentConfigSource {
         Set<String> servers = normalizeIds(listOfStrings(raw.get("servers")), null);
         Set<String> tools = normalizeIds(listOfStrings(raw.get("tools")), "mcp:");
         return new McpAccessPolicy(mode, servers, tools);
+    }
+
+    private AgentRagConfig parseRagConfig(Map<String, Object> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return AgentRagConfig.disabled();
+        }
+        String rawMode = optionalString(raw, "mode", null);
+        boolean enabled = optionalBoolean(raw, "enabled", rawMode != null && !rawMode.isBlank() && AgentRagMode.fromValue(rawMode, AgentRagMode.OFF) != AgentRagMode.OFF);
+        AgentRagMode mode = enabled
+                ? AgentRagMode.fromValue(rawMode, AgentRagMode.TOOL)
+                : AgentRagMode.OFF;
+        Set<String> knowledgeBaseIds = normalizeIds(
+                listOfStrings(raw.containsKey("knowledge-bases") ? raw.get("knowledge-bases") : raw.get("knowledgeBases")),
+                null
+        );
+        Integer topK = raw.containsKey("top-k")
+                ? optionalInt(raw, "top-k", -1)
+                : optionalInt(raw, "topK", -1);
+        return new AgentRagConfig(enabled, mode, knowledgeBaseIds, topK > 0 ? topK : null);
     }
 
     private Set<String> normalizeIds(List<String> ids, String prefix) {

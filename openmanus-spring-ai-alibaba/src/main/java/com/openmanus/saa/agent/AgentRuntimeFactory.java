@@ -1,8 +1,11 @@
 package com.openmanus.saa.agent;
 
+import com.openmanus.saa.config.RagProperties;
 import com.openmanus.saa.model.SkillInfoResponse;
 import com.openmanus.saa.model.ToolMetadata;
 import com.openmanus.saa.model.WorkflowStep;
+import com.openmanus.saa.rag.advisor.RagRetrievalAdvisor;
+import com.openmanus.saa.rag.api.RagRetrievalService;
 import com.openmanus.saa.service.SkillsService;
 import com.openmanus.saa.service.ToolRegistryService;
 import com.openmanus.saa.service.mcp.McpPromptContextService;
@@ -17,6 +20,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -27,19 +31,25 @@ public class AgentRuntimeFactory {
     private final McpPromptContextService mcpPromptContextService;
     private final McpService mcpService;
     private final SkillsService skillsService;
+    private final ObjectProvider<RagRetrievalService> ragRetrievalServiceProvider;
+    private final ObjectProvider<RagProperties> ragPropertiesProvider;
 
     public AgentRuntimeFactory(
             ToolRegistryService toolRegistryService,
             LocalToolCallbackCatalog localToolCallbackCatalog,
             McpPromptContextService mcpPromptContextService,
             McpService mcpService,
-            SkillsService skillsService
+            SkillsService skillsService,
+            ObjectProvider<RagRetrievalService> ragRetrievalServiceProvider,
+            ObjectProvider<RagProperties> ragPropertiesProvider
     ) {
         this.toolRegistryService = toolRegistryService;
         this.localToolCallbackCatalog = localToolCallbackCatalog;
         this.mcpPromptContextService = mcpPromptContextService;
         this.mcpService = mcpService;
         this.skillsService = skillsService;
+        this.ragRetrievalServiceProvider = ragRetrievalServiceProvider;
+        this.ragPropertiesProvider = ragPropertiesProvider;
     }
 
     public ResolvedAgentRuntime resolve(AgentDefinition agentDefinition) {
@@ -75,6 +85,15 @@ public class AgentRuntimeFactory {
                 .map(ToolMetadata::getName)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> allowedLocalToolNames = agentDefinition.getLocalTools().resolveAllowed(knownLocalToolNames);
+        if (agentDefinition.getRag().usesTools()) {
+            allowedLocalToolNames = new LinkedHashSet<>(allowedLocalToolNames);
+            if (knownLocalToolNames.contains("rag_ingest")) {
+                allowedLocalToolNames.add("rag_ingest");
+            }
+            if (knownLocalToolNames.contains("rag_search")) {
+                allowedLocalToolNames.add("rag_search");
+            }
+        }
         boolean skillScopedStep = declaredSkillName != null && !declaredSkillName.isBlank();
         if (stepToolNames != null && !skillScopedStep) {
             allowedLocalToolNames = allowedLocalToolNames.stream()
@@ -107,14 +126,19 @@ public class AgentRuntimeFactory {
                     .toList();
         }
 
+        List<Advisor> advisors = resolveAdvisors(agentDefinition);
+
         Map<String, Object> toolContext = new LinkedHashMap<>();
         toolContext.put("agentId", agentDefinition.getId());
+        if (!agentDefinition.getRag().getKnowledgeBaseIds().isEmpty()) {
+            toolContext.put("knowledgeBaseIds", List.copyOf(agentDefinition.getRag().getKnowledgeBaseIds()));
+        }
 
         return new ResolvedAgentRuntime(
                 agentDefinition,
                 buildSystemPrompt(agentDefinition, allowedLocalToolNames, allowedSkillNames),
                 List.copyOf(callbacks),
-                List.<Advisor>of(),
+                List.copyOf(advisors),
                 Map.copyOf(toolContext)
         );
     }
@@ -163,7 +187,40 @@ public class AgentRuntimeFactory {
             }
         }
 
+        builder.append("\n\nRAG status:\n");
+        if (!agentDefinition.getRag().isEnabled()) {
+            builder.append("- RAG is disabled for this agent.");
+        } else {
+            builder.append("- Mode: ").append(agentDefinition.getRag().getMode()).append("\n");
+            if (agentDefinition.getRag().getKnowledgeBaseIds().isEmpty()) {
+                builder.append("- Knowledge bases: none preconfigured\n");
+            } else {
+                builder.append("- Knowledge bases: ")
+                        .append(String.join(", ", agentDefinition.getRag().getKnowledgeBaseIds()))
+                        .append("\n");
+            }
+            builder.append("- RAG tools exposed: ").append(agentDefinition.getRag().usesTools() ? "yes" : "no").append("\n");
+            builder.append("- RAG advisor enabled: ").append(agentDefinition.getRag().usesAdvisor() ? "yes" : "no");
+        }
+
         return builder.toString().trim();
+    }
+
+    private List<Advisor> resolveAdvisors(AgentDefinition agentDefinition) {
+        if (!agentDefinition.getRag().usesAdvisor() || agentDefinition.getRag().getKnowledgeBaseIds().isEmpty()) {
+            return List.of();
+        }
+        RagRetrievalService ragRetrievalService = ragRetrievalServiceProvider.getIfAvailable();
+        RagProperties ragProperties = ragPropertiesProvider.getIfAvailable();
+        if (ragRetrievalService == null || ragProperties == null) {
+            return List.of();
+        }
+        return List.of(new RagRetrievalAdvisor(
+                agentDefinition.getId(),
+                agentDefinition.getRag(),
+                ragRetrievalService,
+                ragProperties
+        ));
     }
 
     private Set<String> resolveAvailableSkillNames() {
