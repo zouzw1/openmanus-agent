@@ -1,0 +1,110 @@
+# ==================== Java ====================
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.log
+hs_err_pid*
+replay_pid*
+
+# ==================== Maven ====================
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ==================== Gradle ====================
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ==================== IDE ====================
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Eclipse
+.settings/
+.classpath
+.project
+.metadata/
+bin/
+tmp/
+
+# VS Code
+.vscode/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+nbdist/
+nbactions.xml
+nb-configuration.xml
+
+# ==================== OS ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*~
+
+# ==================== Logs & Temp ====================
+logs/
+*.log
+*.log.*
+log/
+temp/
+tmp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+
+# ==================== Environment & Secrets ====================
+.env
+.env.local
+.env.*.local
+application-local.yml
+application-local.properties
+application-secret.yml
+application-secret.properties
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.jks
+
+# ==================== Claude Code ====================
+.claude/
+
+# ==================== Workspace (项目特定) ====================
+# 保留 workspace 目录结构，忽略生成的内容
+workspace/output/
+workspace/*.docx
+workspace/*.pdf
+workspace/*.pyc
+__pycache__/
+
+# ==================== Misc ====================
+*.backup
+*.old
+*.orig
+*.cache

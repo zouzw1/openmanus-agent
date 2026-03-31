@@ -7,6 +7,7 @@ import com.openmanus.saa.config.BrowserProperties;
 import com.openmanus.saa.config.RagProperties;
 import com.openmanus.saa.config.SandboxProperties;
 import com.openmanus.saa.config.SkillsProperties;
+import com.openmanus.saa.config.ModelProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -19,7 +20,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
         BrowserProperties.class,
         RagProperties.class,
         SandboxProperties.class,
-        SkillsProperties.class
+        SkillsProperties.class,
+        ModelProperties.class
 })
 public class OpenManusSpringAiAlibabaApplication {
 

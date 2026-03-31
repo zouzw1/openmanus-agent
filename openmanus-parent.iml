@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module version="4">
+  <component name="AdditionalModuleElements">
+    <content url="file://$MODULE_DIR$" dumb="true">
+      <excludeFolder url="file://$MODULE_DIR$/.idea/httpRequests" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/archive-v0" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/builds-v0" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/environments-v2" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/interpreter-v4" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/sdists-v9" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/simple-v20" />
+      <excludeFolder url="file://$MODULE_DIR$/workspace/.uv-cache/wheels-v6" />
+    </content>
+  </component>
+</module>

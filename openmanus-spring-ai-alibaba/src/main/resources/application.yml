@@ -4,11 +4,19 @@ spring:
   ai:
     dashscope:
       api-key: sk-e149a15431ec48ceb6a839cab679762e
+    zhipuai:
+      api-key: sk-2cjhRDoVwBSvHABkWkZOZnC9z9wnSn1aSnnMfgslTB0qS5H2
+      base-url: https://code.coolyeah.net
+      chat:
+        options:
+          model: glm-5
 
 server:
   port: 8080
 
 openmanus:
+  model:
+    provider: dashscope  # 可选: dashscope（通义千问）或 glm（智谱 AI）
   agents:
     enabled: true
     config-location: ./agents
@@ -21,6 +29,9 @@ openmanus:
     shell-enabled: true
     shell-timeout-seconds: 120
     workflow-use-data-analysis-agent: true
+    multi-agent:
+      enabled: false
+      max-tasks: 6
     planning-validation:
       enabled: false
       fail-on-errors: true

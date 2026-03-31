@@ -285,16 +285,7 @@ public class WorkflowService {
             List<WorkflowStep> steps,
             ResponseMode responseMode
     ) {
-        Optional<Integer> unfinishedIndex = findFirstUnfinishedStepIndex(steps);
-        if (unfinishedIndex.isPresent()) {
-            log.warn(
-                    "Plan {} returned from step execution with unfinished step {}. Attempting one catch-up execution pass.",
-                    planId,
-                    unfinishedIndex.get() + 1
-            );
-            steps = executeStepsWithStatusTracking(sessionId, planId, steps, objective, unfinishedIndex.get());
-        }
-
+        // 先检查是否有 pendingFeedback，如果有则不继续执行后续步骤
         Optional<HumanFeedbackRequest> pendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
         if (pendingFeedback.isPresent()) {
             log.warn("Plan {} paused - waiting for human intervention", planId);
@@ -305,6 +296,31 @@ public class WorkflowService {
                     GRAPH_WORKFLOW_STEPS_KEY, steps,
                     GRAPH_RESPONSE_MODE_KEY, responseMode,
                     GRAPH_PENDING_FEEDBACK_KEY, pendingFeedback.get()
+            );
+        }
+
+        // 没有需要人工干预的步骤时，再检查未完成的步骤
+        Optional<Integer> unfinishedIndex = findFirstUnfinishedStepIndex(steps);
+        if (unfinishedIndex.isPresent()) {
+            log.warn(
+                    "Plan {} returned from step execution with unfinished step {}. Attempting one catch-up execution pass.",
+                    planId,
+                    unfinishedIndex.get() + 1
+            );
+            steps = executeStepsWithStatusTracking(sessionId, planId, steps, objective, unfinishedIndex.get());
+        }
+
+        // 再次检查是否有新的 pendingFeedback（在 catch-up 执行后可能产生）
+        Optional<HumanFeedbackRequest> newPendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
+        if (newPendingFeedback.isPresent()) {
+            log.warn("Plan {} paused after catch-up - waiting for human intervention", planId);
+            return Map.of(
+                    "sessionId", sessionId,
+                    "objective", objective,
+                    GRAPH_PLAN_ID_KEY, planId,
+                    GRAPH_WORKFLOW_STEPS_KEY, steps,
+                    GRAPH_RESPONSE_MODE_KEY, responseMode,
+                    GRAPH_PENDING_FEEDBACK_KEY, newPendingFeedback.get()
             );
         }
 
