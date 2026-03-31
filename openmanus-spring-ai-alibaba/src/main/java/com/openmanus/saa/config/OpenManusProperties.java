@@ -12,6 +12,7 @@ public class OpenManusProperties {
     private boolean workflowUseDataAnalysisAgent = true;
     private String systemPrompt = "";
     private PlanningValidationProperties planningValidation = new PlanningValidationProperties();
+    private MultiAgentProperties multiAgent = new MultiAgentProperties();
 
     public int getMaxSteps() {
         return maxSteps;
@@ -69,6 +70,104 @@ public class OpenManusProperties {
         this.planningValidation = planningValidation == null
                 ? new PlanningValidationProperties()
                 : planningValidation;
+    }
+
+    public MultiAgentProperties getMultiAgent() {
+        return multiAgent;
+    }
+
+    public void setMultiAgent(MultiAgentProperties multiAgent) {
+        this.multiAgent = multiAgent == null ? new MultiAgentProperties() : multiAgent;
+    }
+
+    public static class MultiAgentProperties {
+        private boolean enabled = false;
+        private int maxTasks = 6;
+        private int maxParallelAgents = 3;
+        private int taskTimeoutSeconds = 300;
+        private int messageQueueSize = 100;
+        private int contextMaxTurns = 10;
+        private int contextMaxChars = 8000;
+        private DependencyResolution dependencyResolution = DependencyResolution.AUTO;
+        private java.util.List<String> lifecycleHooks = java.util.List.of("logging");
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getMaxTasks() {
+            return maxTasks;
+        }
+
+        public void setMaxTasks(int maxTasks) {
+            this.maxTasks = maxTasks;
+        }
+
+        public int getMaxParallelAgents() {
+            return maxParallelAgents;
+        }
+
+        public void setMaxParallelAgents(int maxParallelAgents) {
+            this.maxParallelAgents = maxParallelAgents;
+        }
+
+        public int getTaskTimeoutSeconds() {
+            return taskTimeoutSeconds;
+        }
+
+        public void setTaskTimeoutSeconds(int taskTimeoutSeconds) {
+            this.taskTimeoutSeconds = taskTimeoutSeconds;
+        }
+
+        public int getMessageQueueSize() {
+            return messageQueueSize;
+        }
+
+        public void setMessageQueueSize(int messageQueueSize) {
+            this.messageQueueSize = messageQueueSize;
+        }
+
+        public int getContextMaxTurns() {
+            return contextMaxTurns;
+        }
+
+        public void setContextMaxTurns(int contextMaxTurns) {
+            this.contextMaxTurns = contextMaxTurns;
+        }
+
+        public int getContextMaxChars() {
+            return contextMaxChars;
+        }
+
+        public void setContextMaxChars(int contextMaxChars) {
+            this.contextMaxChars = contextMaxChars;
+        }
+
+        public DependencyResolution getDependencyResolution() {
+            return dependencyResolution;
+        }
+
+        public void setDependencyResolution(DependencyResolution dependencyResolution) {
+            this.dependencyResolution = dependencyResolution;
+        }
+
+        public java.util.List<String> getLifecycleHooks() {
+            return lifecycleHooks;
+        }
+
+        public void setLifecycleHooks(java.util.List<String> lifecycleHooks) {
+            this.lifecycleHooks = lifecycleHooks == null ? java.util.List.of() : java.util.List.copyOf(lifecycleHooks);
+        }
+    }
+
+    public enum DependencyResolution {
+        AUTO,
+        EXPLICIT,
+        LLM
     }
 
     public static class PlanningValidationProperties {
