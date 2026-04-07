@@ -1,6 +1,7 @@
 package com.openmanus.saa.model.session;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.openmanus.saa.model.InferencePolicy;
 import com.openmanus.saa.model.ResponseMode;
@@ -140,6 +141,7 @@ public record Session(
 
     // ========== 便捷查询 ==========
 
+    @JsonIgnore
     public boolean isEmpty() {
         return messages.isEmpty() && workingMemory.isEmpty() && executionLog.isEmpty();
     }
@@ -150,6 +152,7 @@ public record Session(
                           null, null);
     }
 
+    @JsonIgnore
     public int estimateTokens() {
         int total = 0;
         for (ConversationMessage msg : messages) {
@@ -172,10 +175,12 @@ public record Session(
                           latestInferencePolicy, latestResponseMode);
     }
 
+    @JsonIgnore
     public Map<String, Object> getAllMemory() {
         return Map.copyOf(workingMemory);
     }
 
+    @JsonIgnore
     public List<String> getExecutionLogList() {
         return List.copyOf(executionLog);
     }

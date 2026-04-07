@@ -1,5 +1,6 @@
 package com.openmanus.saa.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.List;
 
 public record InferencePolicy(
@@ -22,10 +23,12 @@ public record InferencePolicy(
         return new InferencePolicy(false, "none", List.of(), List.of(), List.of(), "");
     }
 
+    @JsonIgnore
     public boolean hasDelegatedFields() {
         return !delegatedFields.isEmpty();
     }
 
+    @JsonIgnore
     public boolean hasMustConfirmFields() {
         return !mustConfirmFields.isEmpty();
     }

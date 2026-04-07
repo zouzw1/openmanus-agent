@@ -1,6 +1,7 @@
 package com.openmanus.saa.model.session;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record TokenUsage(
@@ -26,10 +27,12 @@ public record TokenUsage(
         return new TokenUsage(0, 0, 0, 0);
     }
 
+    @JsonIgnore
     public int totalTokens() {
         return inputTokens + outputTokens + cacheCreationInputTokens + cacheReadInputTokens;
     }
 
+    @JsonIgnore
     public TokenUsage add(TokenUsage other) {
         if (other == null) return this;
         return new TokenUsage(

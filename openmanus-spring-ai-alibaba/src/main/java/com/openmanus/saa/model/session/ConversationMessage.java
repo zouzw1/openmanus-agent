@@ -1,6 +1,7 @@
 package com.openmanus.saa.model.session;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.List;
@@ -82,6 +83,7 @@ public record ConversationMessage(
     /**
      * 获取内容预览（用于摘要）
      */
+    @JsonIgnore
     public String preview(int maxChars) {
         String text = blocks.stream()
             .map(ContentBlock::asText)
@@ -96,6 +98,7 @@ public record ConversationMessage(
     /**
      * 检查是否包含工具调用
      */
+    @JsonIgnore
     public boolean hasToolUse() {
         return blocks.stream().anyMatch(b -> b instanceof ToolUseBlock);
     }
@@ -103,6 +106,7 @@ public record ConversationMessage(
     /**
      * 检查是否包含工具结果
      */
+    @JsonIgnore
     public boolean hasToolResult() {
         return blocks.stream().anyMatch(b -> b instanceof ToolResultBlock);
     }
@@ -110,6 +114,7 @@ public record ConversationMessage(
     /**
      * 提取所有工具名称
      */
+    @JsonIgnore
     public List<String> extractToolNames() {
         return blocks.stream()
             .<String>mapMulti((b, consumer) -> {
