@@ -12,13 +12,6 @@ public record TextBlock(String text) implements ContentBlock {
     @Override
     @JsonIgnore
     public String toSummary() {
-        return truncate(text, 160);
-    }
-
-    private static String truncate(String content, int maxChars) {
-        if (content == null || content.length() <= maxChars) {
-            return content;
-        }
-        return content.substring(0, maxChars) + "…";
+        return ContentBlock.truncate(text, 160);
     }
 }

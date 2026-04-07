@@ -18,13 +18,6 @@ public record ToolResultBlock(
     @JsonIgnore
     public String toSummary() {
         String prefix = isError ? "error " : "";
-        return prefix + "tool_result " + toolName + ": " + truncate(output, 100);
-    }
-
-    private static String truncate(String content, int maxChars) {
-        if (content == null || content.length() <= maxChars) {
-            return content;
-        }
-        return content.substring(0, maxChars) + "…";
+        return prefix + "tool_result " + toolName + ": " + ContentBlock.truncate(output, 100);
     }
 }

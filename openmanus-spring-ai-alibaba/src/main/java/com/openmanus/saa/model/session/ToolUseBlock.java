@@ -12,13 +12,6 @@ public record ToolUseBlock(String id, String name, String input) implements Cont
     @Override
     @JsonIgnore
     public String toSummary() {
-        return "tool_use " + name + "(" + truncate(input, 100) + ")";
-    }
-
-    private static String truncate(String content, int maxChars) {
-        if (content == null || content.length() <= maxChars) {
-            return content;
-        }
-        return content.substring(0, maxChars) + "…";
+        return "tool_use " + name + "(" + ContentBlock.truncate(input, 100) + ")";
     }
 }

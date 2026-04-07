@@ -34,4 +34,19 @@ public sealed interface ContentBlock permits TextBlock, ToolUseBlock, ToolResult
         }
         return "";
     }
+
+    /**
+     * 截断字符串到指定最大长度。
+     * 供实现类在 toSummary() 中使用。
+     *
+     * @param content 要截断的字符串
+     * @param maxChars 最大字符数
+     * @return 截断后的字符串，超长时末尾添加省略号
+     */
+    static String truncate(String content, int maxChars) {
+        if (content == null || content.length() <= maxChars) {
+            return content;
+        }
+        return content.substring(0, maxChars) + "…";
+    }
 }

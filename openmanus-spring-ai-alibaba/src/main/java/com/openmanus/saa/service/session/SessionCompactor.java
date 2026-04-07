@@ -33,15 +33,37 @@ public class SessionCompactor {
 
     /**
      * 检测是否需要压缩（新 Session API）
+     * 使用 compaction prefix len 计算已压缩消息前缀长度，
+     * 而非简单地过滤所有系统消息。
      */
     public boolean shouldCompact(Session session, CompactionConfig config) {
-        // 系统消息不计入压缩范围
-        int compactableCount = (int) session.messages().stream()
-            .filter(m -> m.role() != MessageRole.SYSTEM)
-            .count();
+        // 计算已压缩消息前缀长度：如果首条消息是续接系统消息（包含压缩前导语），则它不应计入压缩范围
+        int compactedPrefixLen = isCompactedContinuationMessage(session)
+            ? 1
+            : 0;
+        int compactableCount = session.messages().size() - compactedPrefixLen;
 
         return compactableCount > config.preserveRecentMessages()
             && estimateSessionTokens(session) >= config.maxEstimatedTokens();
+    }
+
+    /**
+     * 判断首条消息是否为压缩续接消息（系统消息，以压缩前导语开头）。
+     */
+    private boolean isCompactedContinuationMessage(Session session) {
+        if (session.messages().isEmpty()) {
+            return false;
+        }
+        ConversationMessage first = session.messages().get(0);
+        if (first.role() != MessageRole.SYSTEM) {
+            return false;
+        }
+        String text = first.blocks().stream()
+            .filter(b -> b instanceof TextBlock)
+            .map(b -> ((TextBlock) b).text())
+            .findFirst()
+            .orElse("");
+        return text.startsWith(SUMMARY_PREAMBLE);
     }
 
     /**
@@ -55,30 +77,70 @@ public class SessionCompactor {
         log.info("Compacting session {} with {} messages",
             session.sessionId(), session.messages().size());
 
-        // 1. 过滤掉系统消息，计算保留边界
-        List<ConversationMessage> nonSystemMessages = session.messages().stream()
-            .filter(m -> m.role() != MessageRole.SYSTEM)
-            .toList();
+        // 1. 计算已压缩消息前缀长度
+        int compactedPrefixLen = isCompactedContinuationMessage(session)
+            ? 1
+            : 0;
 
-        int keepFrom = nonSystemMessages.size() - config.preserveRecentMessages();
+        // 2. 计算保留边界（从所有消息中保留最近 N 条，排除前缀后）
+        int keepFrom = session.messages().size() - config.preserveRecentMessages();
 
-        // 2. 提取待压缩消息
-        List<ConversationMessage> toCompress = nonSystemMessages.subList(0, keepFrom);
+        // 3. 提取待压缩消息（跳过已压缩前缀）
+        List<ConversationMessage> toCompress =
+            session.messages().subList(compactedPrefixLen, keepFrom);
 
         if (toCompress.isEmpty()) {
             return CompactionResult.unchanged(session);
         }
 
-        // 3. 生成摘要
-        String summary = summarizeMessages(toCompress);
+        // 4. 合并历史摘要（如果存在续接消息中的摘要）
+        String newSummary = summarizeMessages(toCompress);
+        String mergedSummary = compactedPrefixLen > 0
+            ? mergeExistingSummary(session.messages().get(0), newSummary)
+            : newSummary;
 
-        // 4. 构建压缩后的会话
-        Session compacted = buildCompactedSession(session, summary, keepFrom);
+        // 5. 构建压缩后的会话
+        Session compacted = buildCompactedSession(session, mergedSummary, compactedPrefixLen, config);
 
         log.info("Compacted {} messages, summary length: {}",
-            toCompress.size(), summary.length());
+            toCompress.size(), mergedSummary.length());
 
-        return new CompactionResult(summary, formatCompactSummary(summary), compacted, toCompress.size());
+        return new CompactionResult(mergedSummary, formatCompactSummary(mergedSummary), compacted, toCompress.size());
+    }
+
+    /**
+     * 从续接消息中提取已有摘要并与新摘要合并
+     */
+    private String mergeExistingSummary(ConversationMessage continuationMessage, String newSummary) {
+        String existingSummary = extractSummaryFromContinuation(continuationMessage);
+        if (existingSummary == null || existingSummary.isBlank()) {
+            return newSummary;
+        }
+        return mergeSummaries(existingSummary, newSummary);
+    }
+
+    /**
+     * 从续接系统消息中提取摘要内容
+     */
+    private String extractSummaryFromContinuation(ConversationMessage continuation) {
+        String text = continuation.blocks().stream()
+            .filter(b -> b instanceof TextBlock)
+            .map(b -> ((TextBlock) b).text())
+            .findFirst()
+            .orElse("");
+        // 续接消息格式: SUMMARY_PREAMBLE + formatted summary + ...
+        int summaryStart = text.indexOf(SUMMARY_PREAMBLE);
+        if (summaryStart < 0) {
+            return null;
+        }
+        String afterPreamble = text.substring(summaryStart + SUMMARY_PREAMBLE.length());
+        // 找到 RECENT_NOTE 或 RESUME_INSTRUCTION 作为结束标记
+        int endIdx = afterPreamble.length();
+        int recentIdx = afterPreamble.indexOf(RECENT_NOTE);
+        if (recentIdx >= 0) {
+            endIdx = recentIdx;
+        }
+        return afterPreamble.substring(0, endIdx).trim();
     }
 
     // ================== 向后兼容 SessionState API ==================
@@ -338,19 +400,27 @@ public class SessionCompactor {
 
     /**
      * 构建压缩后的会话
+     * @param original 原始会话
+     * @param summary 合并后的摘要
+     * @param compactedPrefixLen 已压缩消息前缀长度（0 或 1）
+     * @param config 压缩配置
      */
-    private Session buildCompactedSession(Session original, String summary, int keepFrom) {
+    private Session buildCompactedSession(Session original, String summary, int compactedPrefixLen, CompactionConfig config) {
         // 生成续接消息作为系统消息
         String continuationMessage = getCompactContinuationMessage(summary, true, true);
         ConversationMessage systemMessage = ConversationMessage.system(continuationMessage);
 
-        // 保留最近的消息（非系统消息）
-        List<ConversationMessage> nonSystemMessages = original.messages().stream()
-            .filter(m -> m.role() != MessageRole.SYSTEM)
-            .toList();
+        // 计算保留边界（从所有消息中保留最近 N 条）
+        int totalMessages = original.messages().size();
+        int preserveCount = Math.min(
+            config.preserveRecentMessages(),
+            totalMessages - compactedPrefixLen
+        );
+        int keepFrom = Math.max(compactedPrefixLen, totalMessages - preserveCount);
 
-        List<ConversationMessage> preservedMessages = nonSystemMessages
-            .subList(keepFrom, nonSystemMessages.size());
+        // 保留最近的消息（跳过已压缩的前缀）
+        List<ConversationMessage> preservedMessages = original.messages()
+            .subList(keepFrom, totalMessages);
 
         // 构建新消息列表：系统消息 + 保留的消息
         List<ConversationMessage> newMessages = new ArrayList<>();

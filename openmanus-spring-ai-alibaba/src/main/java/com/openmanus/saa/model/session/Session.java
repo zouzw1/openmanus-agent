@@ -26,7 +26,10 @@ public record Session(
     InferencePolicy latestInferencePolicy,
     ResponseMode latestResponseMode
 ) {
-    @JsonCreator
+    // Note: Shallow copy is intentional and safe here because:
+    // 1. ConversationMessage is an immutable record (all fields are final)
+    // 2. Session itself is immutable - all modifications create new instances via withXxx methods
+    // 3. This prevents accidental external mutation while maintaining efficiency
     public Session(
         @JsonProperty("version") int version,
         @JsonProperty("sessionId") String sessionId,
