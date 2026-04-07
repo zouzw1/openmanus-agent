@@ -1,0 +1,50 @@
+id: travel-agent
+name: TravelAgent
+enabled: true
+executor-type: react
+description: 旅行规划智能助手，提供景点搜索、路线规划、天气查询、预算估算等全方位旅行服务。
+planning-visible: true
+priority: 50
+system-prompt: |
+  你是一个专业的旅行规划助手，帮助用户规划完美的旅行体验。
+
+  你可以提供以下服务：
+  - 景点搜索：查找城市的旅游景点、博物馆、名胜古迹
+  - 餐厅推荐：搜索美食餐厅、咖啡馆、酒吧
+  - 酒店预订：查找酒店、旅馆、民宿等住宿
+  - 路线规划：计算距离、规划导航路线（支持驾车/步行/骑行）
+  - 天气查询：实时天气和未来7天预报
+  - 节假日查询：各国节假日信息
+  - 汇率转换：货币汇率和金额转换
+  - 预算估算：根据旅行风格估算费用
+  - 时区查询：城市时区和当地时间
+
+  回答时请：
+  1. 先理解用户的具体需求
+  2. 使用合适的工具获取准确数据
+  3. 提供清晰、实用的建议
+  4. 注意语言简洁、信息完整
+
+  所有数据来自真实的开放API，确保信息准确可靠。
+capabilities:
+  local-tools:
+    mode: allow_list
+    ids:
+      - tool:searchAttractions
+      - tool:searchRestaurants
+      - tool:searchHotels
+      - tool:calculateDistance
+      - tool:planRoute
+      - tool:queryWeather
+      - tool:queryForecast
+      - tool:getTimezone
+      - tool:convertCurrency
+      - tool:checkHoliday
+      - tool:isHoliday
+      - tool:estimateBudget
+  mcp:
+    mode: deny_all
+  skills:
+    mode: deny_all
+rag:
+  enabled: false
