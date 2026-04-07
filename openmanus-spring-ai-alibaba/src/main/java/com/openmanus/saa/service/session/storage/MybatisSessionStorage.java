@@ -4,10 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openmanus.saa.model.InferencePolicy;
+import com.openmanus.saa.model.ResponseMode;
 import com.openmanus.saa.model.session.ContentBlock;
 import com.openmanus.saa.model.session.ConversationMessage;
 import com.openmanus.saa.model.session.MessageRole;
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.Session;
 import com.openmanus.saa.model.session.TextBlock;
 import com.openmanus.saa.model.session.TokenUsage;
 import com.openmanus.saa.service.session.entity.ConversationMessageEntity;
@@ -15,13 +17,15 @@ import com.openmanus.saa.service.session.entity.SessionStateEntity;
 import com.openmanus.saa.service.session.mapper.ConversationMessageMapper;
 import com.openmanus.saa.service.session.mapper.SessionStateMapper;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 /**
@@ -52,40 +56,40 @@ public class MybatisSessionStorage implements SessionStorage {
     }
 
     @Override
-    public SessionState save(SessionState session) {
+    public Session save(Session session) {
         SessionStateEntity entity = toEntity(session);
         sessionMapper.insertOrUpdate(entity);
 
         // 删除旧消息并保存新消息
-        messageMapper.deleteBySessionId(session.getSessionId());
-        for (int i = 0; i < session.getMessages().size(); i++) {
-            ConversationMessage message = session.getMessages().get(i);
-            ConversationMessageEntity messageEntity = toMessageEntity(session.getSessionId(), i, message);
+        messageMapper.deleteBySessionId(session.sessionId());
+        for (int i = 0; i < session.messages().size(); i++) {
+            ConversationMessage message = session.messages().get(i);
+            ConversationMessageEntity messageEntity = toMessageEntity(session.sessionId(), i, message);
             messageMapper.insert(messageEntity);
         }
 
-        log.debug("Saved session: {}, messages: {}", session.getSessionId(), session.getMessages().size());
+        log.debug("Saved session: {}, messages: {}", session.sessionId(), session.messages().size());
         return session;
     }
 
     @Override
-    public Optional<SessionState> findById(String sessionId) {
+    public Optional<Session> findById(String sessionId) {
         SessionStateEntity entity = sessionMapper.selectById(sessionId);
         if (entity == null) {
             return Optional.empty();
         }
 
         List<ConversationMessageEntity> messageEntities = messageMapper.findBySessionId(sessionId);
-        return Optional.of(toSessionState(entity, messageEntities));
+        return Optional.of(toSession(entity, messageEntities));
     }
 
     @Override
-    public List<SessionState> findAll() {
+    public List<Session> findAll() {
         List<SessionStateEntity> entities = sessionMapper.selectList(null);
         return entities.stream()
             .map(entity -> {
                 List<ConversationMessageEntity> messages = messageMapper.findBySessionId(entity.getSessionId());
-                return toSessionState(entity, messages);
+                return toSession(entity, messages);
             })
             .collect(Collectors.toList());
     }
@@ -98,11 +102,11 @@ public class MybatisSessionStorage implements SessionStorage {
     }
 
     @Override
-    public List<SessionState> findExpired(Instant threshold) {
+    public List<Session> findExpired(Instant threshold) {
         return sessionMapper.findExpired(threshold).stream()
             .map(entity -> {
                 List<ConversationMessageEntity> messages = messageMapper.findBySessionId(entity.getSessionId());
-                return toSessionState(entity, messages);
+                return toSession(entity, messages);
             })
             .collect(Collectors.toList());
     }
@@ -112,21 +116,37 @@ public class MybatisSessionStorage implements SessionStorage {
         return sessionMapper.selectCount(null);
     }
 
-    private SessionStateEntity toEntity(SessionState session) {
+    private SessionStateEntity toEntity(Session session) {
         SessionStateEntity entity = new SessionStateEntity();
-        entity.setSessionId(session.getSessionId());
-        entity.setCreatedAt(session.getCreatedAt());
-        entity.setUpdatedAt(session.getUpdatedAt());
-        session.getCompactedSummary().ifPresent(entity::setCompactedSummary);
-        if (session.getLatestInferencePolicy() != null) {
+        entity.setSessionId(session.sessionId());
+        entity.setVersion(session.version());
+        entity.setCreatedAt(session.createdAt());
+        entity.setUpdatedAt(session.updatedAt());
+        entity.setLastAccessedAt(session.lastAccessedAt());
+
+        if (session.latestInferencePolicy() != null) {
             try {
-                entity.setLatestInferencePolicy(objectMapper.writeValueAsString(session.getLatestInferencePolicy()));
+                entity.setLatestInferencePolicy(objectMapper.writeValueAsString(session.latestInferencePolicy()));
             } catch (JsonProcessingException e) {
                 log.warn("Failed to serialize inference policy", e);
             }
         }
-        if (session.getLatestResponseMode() != null) {
-            entity.setLatestResponseMode(session.getLatestResponseMode().name());
+        if (session.latestResponseMode() != null) {
+            entity.setLatestResponseMode(session.latestResponseMode().name());
+        }
+        if (!session.workingMemory().isEmpty()) {
+            try {
+                entity.setWorkingMemoryJson(objectMapper.writeValueAsString(session.workingMemory()));
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to serialize working memory", e);
+            }
+        }
+        if (session.cumulativeUsage() != null && !session.cumulativeUsage().equals(TokenUsage.zero())) {
+            try {
+                entity.setCumulativeUsageJson(objectMapper.writeValueAsString(session.cumulativeUsage()));
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to serialize cumulative usage", e);
+            }
         }
         return entity;
     }
@@ -155,36 +175,62 @@ public class MybatisSessionStorage implements SessionStorage {
         return entity;
     }
 
-    private SessionState toSessionState(SessionStateEntity entity, List<ConversationMessageEntity> messageEntities) {
-        SessionState session = new SessionState(entity.getSessionId());
-
-        // Note: SessionState constructor sets createdAt and updatedAt
-        // We need to update them from entity
-        session = new SessionState(entity.getSessionId());
-        java.lang.reflect.Field createdAtField;
-        java.lang.reflect.Field updatedAtField;
-        try {
-            createdAtField = SessionState.class.getDeclaredField("createdAt");
-            createdAtField.setAccessible(true);
-            createdAtField.set(session, entity.getCreatedAt());
-
-            updatedAtField = SessionState.class.getDeclaredField("updatedAt");
-            updatedAtField.setAccessible(true);
-            updatedAtField.set(session, entity.getUpdatedAt());
-        } catch (Exception e) {
-            log.warn("Failed to set session timestamps", e);
-        }
-
-        if (entity.getCompactedSummary() != null) {
-            session.setCompactedSummary(entity.getCompactedSummary());
-        }
-
+    private Session toSession(SessionStateEntity entity, List<ConversationMessageEntity> messageEntities) {
+        List<ConversationMessage> messages = new ArrayList<>();
         for (ConversationMessageEntity messageEntity : messageEntities) {
             ConversationMessage message = toConversationMessage(messageEntity);
-            session.addMessage(message);
+            messages.add(message);
         }
 
-        return session;
+        Map<String, Object> workingMemory = new HashMap<>();
+        if (entity.getWorkingMemoryJson() != null) {
+            try {
+                workingMemory = objectMapper.readValue(entity.getWorkingMemoryJson(), new TypeReference<HashMap<String, Object>>() {});
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to deserialize working memory", e);
+            }
+        }
+
+        TokenUsage cumulativeUsage = TokenUsage.zero();
+        if (entity.getCumulativeUsageJson() != null) {
+            try {
+                cumulativeUsage = objectMapper.readValue(entity.getCumulativeUsageJson(), TokenUsage.class);
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to deserialize cumulative usage", e);
+            }
+        }
+
+        InferencePolicy inferencePolicy = null;
+        if (entity.getLatestInferencePolicy() != null) {
+            try {
+                inferencePolicy = objectMapper.readValue(entity.getLatestInferencePolicy(), InferencePolicy.class);
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to deserialize inference policy", e);
+            }
+        }
+
+        ResponseMode responseMode = null;
+        if (entity.getLatestResponseMode() != null) {
+            try {
+                responseMode = ResponseMode.valueOf(entity.getLatestResponseMode());
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid response mode: {}", entity.getLatestResponseMode());
+            }
+        }
+
+        return new Session(
+            entity.getVersion() != null ? entity.getVersion() : 1,
+            entity.getSessionId(),
+            entity.getCreatedAt(),
+            entity.getUpdatedAt(),
+            entity.getLastAccessedAt() != null ? entity.getLastAccessedAt() : entity.getUpdatedAt(),
+            messages,
+            workingMemory,
+            new ArrayList<>(), // executionLog is not persisted in DB currently
+            cumulativeUsage,
+            inferencePolicy,
+            responseMode
+        );
     }
 
     private ConversationMessage toConversationMessage(ConversationMessageEntity entity) {

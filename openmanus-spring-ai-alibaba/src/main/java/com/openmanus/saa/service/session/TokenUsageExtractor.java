@@ -20,7 +20,7 @@ public class TokenUsageExtractor {
 
         return new TokenUsage(
             usage.getPromptTokens() != null ? usage.getPromptTokens() : 0,
-            0,
+            usage.getCompletionTokens() != null ? usage.getCompletionTokens().intValue() : 0,
             0,
             0
         );

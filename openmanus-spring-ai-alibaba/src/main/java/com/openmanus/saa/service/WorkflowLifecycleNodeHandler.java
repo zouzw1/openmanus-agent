@@ -10,7 +10,8 @@ import com.openmanus.saa.model.OutputEvaluationStatus;
 import com.openmanus.saa.model.ResponseMode;
 import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowStep;
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.ConversationMessage;
+import com.openmanus.saa.model.session.Session;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,8 +42,8 @@ final class WorkflowLifecycleNodeHandler {
     Map<String, Object> checkPendingFeedbackNode(OverAllState state) {
         String sessionId = state.value("sessionId", String.class).orElseThrow();
         String objective = state.value("objective", String.class).orElseThrow();
-        SessionState session = service.sessionMemoryService().getOrCreate(sessionId);
-        String resolvedSessionId = session.getSessionId();
+        Session session = service.sessionMemoryService().getOrCreate(sessionId);
+        String resolvedSessionId = session.sessionId();
         Optional<HumanFeedbackRequest> pendingFeedback = service.sessionMemoryService().getPendingFeedback(resolvedSessionId);
         if (pendingFeedback.isPresent()) {
             log.info("Session {} still waiting for human feedback", resolvedSessionId);
@@ -73,18 +74,21 @@ final class WorkflowLifecycleNodeHandler {
     Map<String, Object> resolveAndExecuteNode(OverAllState state) {
         String sessionId = state.value("sessionId", String.class).orElseThrow();
         String objective = state.value("objective", String.class).orElseThrow();
-        SessionState session = service.sessionMemoryService().getOrCreate(sessionId);
+        Session session = service.sessionMemoryService().getOrCreate(sessionId);
         IntentResolution providedIntentResolution = state.value(GRAPH_INTENT_RESOLUTION_KEY, IntentResolution.class).orElse(null);
         IntentResolution intentResolution = providedIntentResolution == null
                 ? service.intentResolutionService().resolve(objective, session)
                 : providedIntentResolution;
         ResponseMode responseMode = service.resolveResponseMode(intentResolution, session);
+        // Update session with immutable operations
+        Session updatedSession = session;
         if (responseMode != null) {
-            session.setLatestResponseMode(responseMode);
-            session.addExecutionLog("Response mode resolved: " + responseMode);
+            updatedSession = service.updateSessionResponseMode(updatedSession, responseMode);
+            updatedSession = updatedSession.addExecutionLog("Response mode resolved: " + responseMode);
         }
-        session.addExecutionLog("Intent resolved: " + intentResolution.intentId() + " -> " + intentResolution.routeMode());
-        session.addMessage("user", objective);
+        updatedSession = updatedSession.addExecutionLog("Intent resolved: " + intentResolution.intentId() + " -> " + intentResolution.routeMode());
+        updatedSession = updatedSession.addUserMessage(objective);
+        service.sessionMemoryService().getOrCreate(updatedSession.sessionId()); // This will save the session through getOrCreate
         WorkflowExecutionResponse response = service.executeNewPlan(sessionId, objective, intentResolution);
         return Map.of(GRAPH_RESPONSE_KEY, response);
     }
@@ -187,7 +191,7 @@ final class WorkflowLifecycleNodeHandler {
         );
 
         log.info("Created plan {} with {} steps for session {}", planId, steps.size(), sessionId);
-        SessionState session = service.sessionMemoryService().getOrCreate(sessionId);
+        Session session = service.sessionMemoryService().getOrCreate(sessionId);
         ResponseMode responseMode = service.resolveResponseMode(intentResolution, session);
         return Map.of(
                 "sessionId", sessionId,
@@ -325,8 +329,9 @@ final class WorkflowLifecycleNodeHandler {
                 .map(service::coerceWorkflowSteps)
                 .orElse(List.of());
         WorkflowService.OutputEvaluationDecision decision = service.evaluateOutput(objective, currentSteps, responseMode);
-        SessionState session = service.sessionMemoryService().getOrCreate(sessionId);
-        session.addExecutionLog("Output evaluation: " + decision.status() + " | " + decision.message());
+        Session session = service.sessionMemoryService().getOrCreate(sessionId);
+        Session updatedSession = session.addExecutionLog("Output evaluation: " + decision.status() + " | " + decision.message());
+        service.sessionMemoryService().getOrCreate(updatedSession.sessionId()); // Save through getOrCreate
         return Map.of(
                 GRAPH_OUTPUT_EVALUATION_DECISION_KEY, decision,
                 GRAPH_OUTPUT_EVALUATION_RESULT_KEY, decision.toResult(retryCount, WorkflowService.DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES, false)
@@ -365,11 +370,12 @@ final class WorkflowLifecycleNodeHandler {
                 .map(service::coerceWorkflowSteps)
                 .orElse(List.of());
 
-        SessionState session = service.sessionMemoryService().getOrCreate(sessionId);
-        session.addExecutionLog("Output evaluation requested automatic retry #" + retryCount);
+        Session session = service.sessionMemoryService().getOrCreate(sessionId);
+        Session updatedSession = session.addExecutionLog("Output evaluation requested automatic retry #" + retryCount);
         if (decision.revisionPrompt() != null && !decision.revisionPrompt().isBlank()) {
-            session.addMessage("system", "[OUTPUT_EVALUATION_RETRY] " + decision.revisionPrompt());
+            updatedSession = updatedSession.addSystemMessage("[OUTPUT_EVALUATION_RETRY] " + decision.revisionPrompt());
         }
+        service.sessionMemoryService().getOrCreate(updatedSession.sessionId()); // Save through getOrCreate
 
         int retryStartIndex = service.clampRetryStartIndex(currentSteps, decision.retryStartIndex());
         List<WorkflowStep> retriedSteps = service.prepareStepsForOutputRetry(currentSteps, decision, retryCount);

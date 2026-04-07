@@ -6,8 +6,6 @@ import com.openmanus.saa.model.HumanFeedbackResponse;
 import com.openmanus.saa.model.session.*;
 import com.openmanus.saa.service.session.storage.SessionStorage;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,29 +33,23 @@ public class SessionMemoryService {
             config.getStorage(), config.isCompactionEnabled(), config.getSessionTtl());
     }
 
-    public SessionState getOrCreate(String sessionId) {
+    public Session getOrCreate(String sessionId) {
         String resolvedId = resolveSessionId(sessionId);
 
-        Optional<SessionState> existing = storage.findById(resolvedId);
+        Optional<Session> existing = storage.findById(resolvedId);
         if (existing.isPresent()) {
-            SessionState session = existing.get();
-
-            // 更新最后访问时间
-            session.touch();
+            Session session = existing.get();
 
             // 自动压缩检查
             if (config.isCompactionEnabled()) {
                 if (compactor.shouldCompact(session, config.getCompaction())) {
-                    // 使用新的 Session API 进行压缩
-                    Session newSession = convertToSession(session);
-                    CompactionResult result = compactor.compactSession(newSession, config.getCompaction());
+                    CompactionResult result = compactor.compactSession(session, config.getCompaction());
                     if (result.wasCompacted()) {
-                        // 将压缩后的 Session 转换回 SessionState
-                        SessionState compactedState = convertToSessionState(result.compactedSession());
-                        storage.save(compactedState);
+                        Session compactedSession = result.compactedSession();
+                        storage.save(compactedSession);
                         log.info("Auto-compacted session {}: {} messages removed",
                             resolvedId, result.removedMessageCount());
-                        return compactedState;
+                        return compactedSession;
                     }
                 }
             }
@@ -65,53 +57,21 @@ public class SessionMemoryService {
             return session;
         }
 
-        return storage.save(new SessionState(resolvedId));
+        return storage.save(new Session(resolvedId));
     }
 
     /**
-     * 将 SessionState 转换为 Session
+     * 保存会话（用于不可变 Session 操作后的持久化）
      */
-    private Session convertToSession(SessionState state) {
-        return new Session(
-            1,
-            state.getSessionId(),
-            state.getCreatedAt(),
-            state.getUpdatedAt(),
-            state.getLastAccessedAt(),
-            new ArrayList<>(state.getMessages()),
-            new HashMap<>(),
-            new ArrayList<>(state.getExecutionLog()),
-            TokenUsage.zero(),
-            state.getLatestInferencePolicy(),
-            state.getLatestResponseMode()
-        );
-    }
-
-    /**
-     * 将 Session 转换为 SessionState
-     */
-    private SessionState convertToSessionState(Session session) {
-        SessionState state = new SessionState(session.sessionId());
-        for (ConversationMessage msg : session.messages()) {
-            state.addMessage(msg);
-        }
-        for (String logEntry : session.executionLog()) {
-            state.addExecutionLog(logEntry);
-        }
-        if (session.latestInferencePolicy() != null) {
-            state.setLatestInferencePolicy(session.latestInferencePolicy());
-        }
-        if (session.latestResponseMode() != null) {
-            state.setLatestResponseMode(session.latestResponseMode());
-        }
-        return state;
+    public Session saveSession(Session session) {
+        return storage.save(session);
     }
 
     /**
      * @deprecated 使用 {@link #getOrCreate(String)} 代替
      */
     @Deprecated
-    public SessionState getOrCreateWithCompaction(String sessionId) {
+    public Session getOrCreateWithCompaction(String sessionId) {
         return getOrCreate(sessionId);
     }
 
@@ -132,9 +92,9 @@ public class SessionMemoryService {
         return true;
     }
 
-    public String summarizeHistory(SessionState state, int maxMessages) {
-        int start = Math.max(0, state.getMessages().size() - maxMessages);
-        return state.getMessages().subList(start, state.getMessages().size()).stream()
+    public String summarizeHistory(Session session, int maxMessages) {
+        int start = Math.max(0, session.messages().size() - maxMessages);
+        return session.messages().subList(start, session.messages().size()).stream()
             .map(message -> message.role().name().toLowerCase() + ": " +
                 message.blocks().stream()
                     .map(b -> b.asText())
@@ -179,21 +139,12 @@ public class SessionMemoryService {
      * 手动压缩指定会话
      */
     public CompactionResult compactSession(String sessionId) {
-        SessionState session = storage.findById(sessionId)
+        Session session = storage.findById(sessionId)
             .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
-        Session newSession = convertToSession(session);
-        CompactionResult result = compactor.compactSession(newSession, config.getCompaction());
+        CompactionResult result = compactor.compactSession(session, config.getCompaction());
         if (result.wasCompacted()) {
-            SessionState compactedState = convertToSessionState(result.compactedSession());
-            storage.save(compactedState);
-            // 返回包含 SessionState 转换的结果
-            return new CompactionResult(
-                result.summary(),
-                result.formattedSummary(),
-                convertToSession(compactedState),
-                result.removedMessageCount()
-            );
+            storage.save(result.compactedSession());
         }
         return result;
     }
@@ -205,9 +156,9 @@ public class SessionMemoryService {
         return storage.findById(sessionId)
             .map(session -> Map.<String, Object>of(
                 "sessionId", sessionId,
-                "messageCount", session.getMessages().size(),
+                "messageCount", session.messages().size(),
                 "estimatedTokens", session.estimateTokens(),
-                "hasCompactedSummary", session.getCompactedSummary().isPresent()
+                "workingMemoryKeys", session.workingMemory().keySet()
             ))
             .orElse(Map.of());
     }
@@ -222,13 +173,13 @@ public class SessionMemoryService {
         }
 
         Instant threshold = Instant.now().minus(config.getSessionTtl());
-        List<SessionState> expired = storage.findExpired(threshold);
+        List<Session> expired = storage.findExpired(threshold);
 
         if (!expired.isEmpty()) {
             log.info("Cleaning up {} expired sessions (threshold: {})", expired.size(), threshold);
-            for (SessionState session : expired) {
-                storage.deleteById(session.getSessionId());
-                log.debug("Cleaned up expired session: {}", session.getSessionId());
+            for (Session session : expired) {
+                storage.deleteById(session.sessionId());
+                log.debug("Cleaned up expired session: {}", session.sessionId());
             }
         }
     }
@@ -249,13 +200,13 @@ public class SessionMemoryService {
         return (sessionId == null || sessionId.isBlank()) ? UUID.randomUUID().toString() : sessionId;
     }
 
-    private SessionStateResponse toResponse(SessionState state) {
+    private SessionStateResponse toResponse(Session session) {
         return new SessionStateResponse(
-            state.getSessionId(),
-            state.getCreatedAt(),
-            state.getUpdatedAt(),
-            List.copyOf(state.getMessages()),
-            List.copyOf(state.getExecutionLog())
+            session.sessionId(),
+            session.createdAt(),
+            session.updatedAt(),
+            List.copyOf(session.messages()),
+            session.getExecutionLogList()
         );
     }
 }

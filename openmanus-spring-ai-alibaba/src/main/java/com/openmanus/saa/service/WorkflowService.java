@@ -22,16 +22,18 @@ import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowExecutionStatus;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.model.WorkflowSummary;
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.Session;
 import com.openmanus.saa.service.agent.AgentExecutionResult;
 import com.openmanus.saa.service.agent.SpecialistAgent;
 import com.openmanus.saa.service.intent.IntentResolutionService;
+import com.openmanus.saa.service.session.SessionManager;
 import com.openmanus.saa.service.session.SessionMemoryService;
 import com.openmanus.saa.service.summary.WorkflowSummaryContext;
 import com.openmanus.saa.service.summary.WorkflowSummaryFormatter;
+import com.openmanus.saa.service.supervisor.MultiAgentExecutionResponse;
+import com.openmanus.saa.service.supervisor.SupervisorAgentService;
 import com.openmanus.saa.tool.PlanningTools;
 import com.openmanus.saa.util.ParameterMissingDetector;
-import com.openmanus.saa.util.IntentResolutionHelper;
 import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,12 +87,22 @@ public class WorkflowService {
     private static final String GRAPH_EXECUTED_STEP_COUNT_KEY = "executedStepCount";
     private static final String GRAPH_LOOP_CONTINUE_KEY = "loopContinue";
 
+    /**
+     * Intermediate artifact extensions that should not be reported to users.
+     */
+    private static final java.util.Set<String> INTERMEDIATE_EXTENSIONS = java.util.Set.of(
+        ".py", ".sh", ".bat", ".cmd", ".ps1",
+        ".tmp", ".temp", ".log", ".cache",
+        ".class", ".jar", ".war"
+    );
+
     private final ChatClient chatClient;
     private final PlanningService planningService;
     private final PlanningTools planningTools;
     private final OpenManusProperties properties;
     private final Map<String, SpecialistAgent> agentExecutors;
     private final SessionMemoryService sessionMemoryService;
+    private final SessionManager sessionManager;
     private final AgentRegistryService agentRegistryService;
     private final SkillsService skillsService;
     private final SkillCapabilityService skillCapabilityService;
@@ -102,6 +114,7 @@ public class WorkflowService {
     private final WorkflowGraphOrchestrator graphOrchestrator;
     private final WorkflowLifecycleNodeHandler lifecycleNodeHandler;
     private final WorkflowStepExecutionHandler stepExecutionHandler;
+    private final SupervisorAgentService supervisorAgentService;
 
     public WorkflowService(
             ChatClient chatClient,
@@ -110,18 +123,21 @@ public class WorkflowService {
             OpenManusProperties properties,
             List<SpecialistAgent> agentExecutors,
             SessionMemoryService sessionMemoryService,
+            SessionManager sessionManager,
             AgentRegistryService agentRegistryService,
             SkillsService skillsService,
             SkillCapabilityService skillCapabilityService,
             AgentCapabilitySnapshotService agentCapabilitySnapshotService,
             IntentResolutionService intentResolutionService,
-            List<WorkflowSummaryFormatter> workflowSummaryFormatters
+            List<WorkflowSummaryFormatter> workflowSummaryFormatters,
+            SupervisorAgentService supervisorAgentService
     ) {
         this.chatClient = chatClient;
         this.planningService = planningService;
         this.planningTools = planningTools;
         this.properties = properties;
         this.sessionMemoryService = sessionMemoryService;
+        this.sessionManager = sessionManager;
         this.agentRegistryService = agentRegistryService;
         this.skillsService = skillsService;
         this.skillCapabilityService = skillCapabilityService;
@@ -137,6 +153,7 @@ public class WorkflowService {
         this.graphOrchestrator = new WorkflowGraphOrchestrator(this);
         this.lifecycleNodeHandler = new WorkflowLifecycleNodeHandler(this);
         this.stepExecutionHandler = new WorkflowStepExecutionHandler(this);
+        this.supervisorAgentService = supervisorAgentService;
         this.agentExecutors = new LinkedHashMap<>();
         for (SpecialistAgent agent : agentExecutors) {
             this.agentExecutors.put(agent.name(), agent);
@@ -148,7 +165,7 @@ public class WorkflowService {
     }
 
     public WorkflowExecutionResponse execute(String sessionId, String objective, IntentResolution providedIntentResolution) {
-        String resolvedSessionId = sessionMemoryService.getOrCreate(sessionId).getSessionId();
+        String resolvedSessionId = sessionMemoryService.getOrCreate(sessionId).sessionId();
         String executionId = UUID.randomUUID().toString();
         if (!sessionMemoryService.tryStartWorkflowExecution(resolvedSessionId, executionId)) {
             String message = ResponseLanguageHelper.choose(
@@ -163,6 +180,40 @@ public class WorkflowService {
         } finally {
             sessionMemoryService.finishWorkflowExecution(resolvedSessionId, executionId);
         }
+    }
+
+    /**
+     * Execute a multi-agent task using the SupervisorAgentService.
+     * This method enables parallel task execution with multiple specialized agents.
+     *
+     * @param sessionId the session ID
+     * @param objective the objective to achieve
+     * @return the multi-agent execution response
+     */
+    public MultiAgentExecutionResponse executeMultiAgent(String sessionId, String objective) {
+        if (supervisorAgentService == null) {
+            return MultiAgentExecutionResponse.disabled("Multi-agent execution is not available");
+        }
+        String resolvedSessionId = sessionMemoryService.getOrCreate(sessionId).sessionId();
+        log.info("Starting multi-agent execution for session: {}", resolvedSessionId);
+        return supervisorAgentService.execute(resolvedSessionId, objective);
+    }
+
+    /**
+     * Execute a multi-agent task with pre-defined tasks.
+     *
+     * @param sessionId the session ID
+     * @param objective the objective to achieve
+     * @param tasks the pre-defined tasks to execute
+     * @return the multi-agent execution response
+     */
+    public MultiAgentExecutionResponse executeMultiAgentWithTasks(String sessionId, String objective, List<com.openmanus.saa.model.AgentTask> tasks) {
+        if (supervisorAgentService == null) {
+            return MultiAgentExecutionResponse.disabled("Multi-agent execution is not available");
+        }
+        String resolvedSessionId = sessionMemoryService.getOrCreate(sessionId).sessionId();
+        log.info("Starting multi-agent execution with {} tasks for session: {}", tasks.size(), resolvedSessionId);
+        return supervisorAgentService.executeWithTasks(resolvedSessionId, objective, tasks);
     }
 
     public AgentResponse executeAsAgentResponse(String sessionId, String objective) {
@@ -438,7 +489,8 @@ public class WorkflowService {
                 executedSteps,
                 responseMode
         );
-        sessionMemoryService.getOrCreate(sessionId).addMessage("assistant", response.summary().userMessage());
+        Session session = sessionMemoryService.getOrCreate(sessionId);
+        sessionMemoryService.saveSession(session.addAssistantMessage(response.summary().userMessage()));
         return response;
     }
 
@@ -541,8 +593,8 @@ public class WorkflowService {
                 userMessage
         );
 
-        SessionState session = sessionMemoryService.getOrCreate(sessionId);
-        session.addMessage("assistant", summary.userMessage());
+        Session session = sessionMemoryService.getOrCreate(sessionId);
+        sessionMemoryService.saveSession(session.addAssistantMessage(summary.userMessage()));
 
         return new WorkflowExecutionResponse(
                 pendingFeedback.getObjective(),
@@ -610,7 +662,8 @@ public class WorkflowService {
                         objective,
                         currentPlan,
                         effectiveStep,
-                        buildStepExecutionPrompt(effectiveStep, attempt, error, skillLoadResult.skillContent, inferencePolicy)
+                        buildStepExecutionPrompt(effectiveStep, attempt, error, skillLoadResult.skillContent, inferencePolicy),
+                        sessionId  // 传递sessionId以启用会话上下文
                 );
                 result = execution.content();
                 usedTools = mergeToolNames(skillLoadResult.usedTools, execution.usedTools());
@@ -874,12 +927,19 @@ public class WorkflowService {
                 .append(STEP_OUTCOME_END).append("\n")
                 .append("- Use only these JSON keys: status, message, missingFields, artifacts, retryable.\n")
                 .append("- The outcome block must be valid JSON with double-quoted keys and string values.\n")
-                .append("- Use SUCCESS only when this step is actually complete.\n")
-                .append("- If the required tool call succeeded and produced a usable step result, prefer SUCCESS even when the content could still be improved later.\n")
-                .append("- Do not use FAILED only because the result is somewhat generic, could be more detailed, or may need refinement in a later quality-evaluation stage.\n")
+                .append("- Use SUCCESS only when this step's core objective is ACHIEVED, not just when tools were called.\n")
+                .append("- Before reporting SUCCESS, verify:\n")
+                .append("  * Check your output for failure indicators like 'cannot', 'unavailable', 'failed', 'error', 'unable'.\n")
+                .append("  * If the skill requires external tools (e.g., PDF conversion), ensure those tools actually worked.\n")
+                .append("  * If a file was generated, verify it exists AND has valid content.\n")
+                .append("- If your output contains phrases indicating failure (e.g., 'cannot convert', 'tools not available', 'failed to'), use FAILED instead of SUCCESS.\n")
+                .append("- Do NOT report SUCCESS when:\n")
+                .append("  * The skill's stated goal was NOT achieved (only partial progress made).\n")
+                .append("  * External dependencies (tools, libraries, APIs) were unavailable or failed.\n")
+                .append("  * The generated output is invalid, empty, or corrupted.\n")
                 .append("- Use NEEDS_HUMAN_FEEDBACK only when the user must provide additional information.\n")
                 .append("- Use RETRYABLE_ERROR only for transient or correctable errors within this step.\n")
-                .append("- Use FAILED only for non-recoverable execution failures or when this step's core required output is completely missing.\n")
+                .append("- Use FAILED for non-recoverable execution failures or when this step's core required output is completely missing.\n")
                 .append("- Keep any prose above the outcome block concise and directly tied to this step.\n");
 
         String skillName = declaredSkillName(step);
@@ -1418,19 +1478,29 @@ public class WorkflowService {
         return displayName.startsWith("mcp:") || displayName.startsWith("skill:");
     }
 
+    private boolean isIntermediateArtifact(String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        return INTERMEDIATE_EXTENSIONS.stream().anyMatch(lower::endsWith);
+    }
+
     List<String> resolveStepArtifacts(WorkflowStep step, List<String> usedToolCalls, List<String> outcomeArtifacts) {
         LinkedHashSet<String> artifacts = new LinkedHashSet<>();
         if (outcomeArtifacts != null) {
             outcomeArtifacts.stream()
-                    .filter(path -> path != null && !path.isBlank())
-                    .map(String::trim)
-                    .map(this::toAbsoluteArtifactPath)
-                    .forEach(artifacts::add);
+                .filter(path -> path != null && !path.isBlank())
+                .filter(path -> !isIntermediateArtifact(path))
+                .map(String::trim)
+                .map(this::toAbsoluteArtifactPath)
+                .forEach(artifacts::add);
         }
         try {
             resolveOutputArtifactPaths(step, usedToolCalls, null).stream()
-                    .map(this::toAbsoluteArtifactPath)
-                    .forEach(artifacts::add);
+                .filter(path -> !isIntermediateArtifact(path))
+                .map(this::toAbsoluteArtifactPath)
+                .forEach(artifacts::add);
         } catch (Exception ex) {
             log.debug("Failed to resolve step artifacts for display: {}", ex.getMessage());
         }
@@ -1533,18 +1603,26 @@ public class WorkflowService {
         LinkedHashSet<String> paths = new LinkedHashSet<>();
 
         List<String> explicitWritePaths = resolveWriteWorkspaceToolPaths(usedToolCalls);
-        paths.addAll(explicitWritePaths);
+
+        // Filter: only keep final artifacts, exclude intermediate files
+        explicitWritePaths.stream()
+            .filter(path -> !isIntermediateArtifact(path))
+            .forEach(paths::add);
 
         if (paths.isEmpty() && step != null && step.getParameterContext() != null) {
             Object relativePathValue = step.getParameterContext().get("relativePath");
             if (relativePathValue instanceof String relativePath && !relativePath.isBlank()) {
-                paths.add(relativePath.trim());
+                // Only add if it's not an intermediate artifact
+                if (!isIntermediateArtifact(relativePath)) {
+                    paths.add(relativePath.trim());
+                }
             }
         }
 
         if (outcome != null && outcome.artifacts() != null) {
             outcome.artifacts().stream()
                     .filter(path -> path != null && !path.isBlank())
+                    .filter(path -> !isIntermediateArtifact(path))
                     .map(String::trim)
                     .forEach(paths::add);
         }
@@ -1597,7 +1675,7 @@ public class WorkflowService {
         context.append("Workflow execution context:\n");
         context.append("- Current step index: ").append(currentStepIndex + 1).append(" / ").append(workflowSteps.size()).append("\n");
 
-        SessionState session = sessionMemoryService.getOrCreate(sessionId);
+        Session session = sessionMemoryService.getOrCreate(sessionId);
         String history = sessionMemoryService.summarizeHistory(session, EXECUTION_HISTORY_TURN_LIMIT);
         context.append("Recent conversation summary:\n");
         if (history == null || history.isBlank()) {
@@ -1690,11 +1768,11 @@ public class WorkflowService {
         return context.toString();
     }
 
-    private InferencePolicy resolveLatestInferencePolicy(SessionState session) {
-        if (session == null || session.getLatestInferencePolicy() == null) {
+    private InferencePolicy resolveLatestInferencePolicy(Session session) {
+        if (session == null || session.latestInferencePolicy() == null) {
             return InferencePolicy.none();
         }
-        return session.getLatestInferencePolicy();
+        return session.latestInferencePolicy();
     }
 
     private String formatInferencePolicy(InferencePolicy inferencePolicy) {
@@ -3376,19 +3454,23 @@ public class WorkflowService {
         }
     }
 
-    ResponseMode resolveResponseMode(IntentResolution intentResolution, SessionState session) {
-        ResponseMode responseMode = IntentResolutionHelper.responseMode(intentResolution);
+    ResponseMode resolveResponseMode(IntentResolution intentResolution, Session session) {
+        ResponseMode responseMode = ResponseMode.from(intentResolution.attributes().get("responseMode"));
         if (responseMode != null) {
             return responseMode;
         }
         return resolveResponseMode(session);
     }
 
-    ResponseMode resolveResponseMode(SessionState session) {
-        if (session == null || session.getLatestResponseMode() == null) {
+    ResponseMode resolveResponseMode(Session session) {
+        if (session == null || session.latestResponseMode() == null) {
             return ResponseMode.HYBRID;
         }
-        return session.getLatestResponseMode();
+        return session.latestResponseMode();
+    }
+
+    Session updateSessionResponseMode(Session session, ResponseMode responseMode) {
+        return session.withLatestResponseMode(responseMode);
     }
 
     private String indentForExecutionContext(String text, String prefix) {

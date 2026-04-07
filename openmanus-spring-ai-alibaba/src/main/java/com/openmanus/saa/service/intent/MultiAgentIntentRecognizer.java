@@ -4,7 +4,7 @@ import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.IntentRouteMode;
 import com.openmanus.saa.model.session.MessageRole;
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.Session;
 import com.openmanus.saa.model.session.TextBlock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,7 +60,7 @@ public class MultiAgentIntentRecognizer implements IntentRecognizer {
     }
 
     @Override
-    public Optional<IntentResolution> recognize(String prompt, SessionState session) {
+    public Optional<IntentResolution> recognize(String prompt, Session session) {
         if (!properties.getMultiAgent().isEnabled()) {
             return Optional.empty();
         }
@@ -76,7 +76,7 @@ public class MultiAgentIntentRecognizer implements IntentRecognizer {
         return Optional.empty();
     }
 
-    private MultiAgentScore analyzePrompt(String prompt, SessionState session) {
+    private MultiAgentScore analyzePrompt(String prompt, Session session) {
         double confidence = 0.0;
         String lowerPrompt = prompt.toLowerCase();
 
@@ -121,8 +121,8 @@ public class MultiAgentIntentRecognizer implements IntentRecognizer {
         }
 
         // Session-aware context boost
-        if (session != null && !session.getMessages().isEmpty()) {
-            int recentTurns = (int) session.getMessages().stream()
+        if (session != null && !session.messages().isEmpty()) {
+            int recentTurns = (int) session.messages().stream()
                     .filter(m -> m.role() != MessageRole.SYSTEM)
                     .count();
 
@@ -133,7 +133,7 @@ public class MultiAgentIntentRecognizer implements IntentRecognizer {
             }
 
             // Check for continuation patterns suggesting ongoing complex work
-            String recentHistory = session.getMessages().stream()
+            String recentHistory = session.messages().stream()
                     .filter(m -> m.role() == MessageRole.ASSISTANT)
                     .map(m -> m.blocks().stream()
                         .filter(b -> b instanceof TextBlock)

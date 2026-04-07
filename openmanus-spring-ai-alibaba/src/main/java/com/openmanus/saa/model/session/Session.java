@@ -146,6 +146,18 @@ public record Session(
         return messages.isEmpty() && workingMemory.isEmpty() && executionLog.isEmpty();
     }
 
+    public Session withLatestResponseMode(ResponseMode mode) {
+        return new Session(version, sessionId, createdAt, Instant.now(), Instant.now(),
+                          messages, workingMemory, executionLog, cumulativeUsage,
+                          latestInferencePolicy, mode);
+    }
+
+    public Session withLatestInferencePolicy(InferencePolicy policy) {
+        return new Session(version, sessionId, createdAt, Instant.now(), Instant.now(),
+                          messages, workingMemory, executionLog, cumulativeUsage,
+                          policy, latestResponseMode);
+    }
+
     public Session clear() {
         return new Session(version, sessionId, createdAt, Instant.now(), Instant.now(),
                           new ArrayList<>(), new HashMap<>(), new ArrayList<>(), TokenUsage.zero(),
