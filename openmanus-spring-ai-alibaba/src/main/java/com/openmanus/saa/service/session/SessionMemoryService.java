@@ -3,11 +3,11 @@ package com.openmanus.saa.service.session;
 import com.openmanus.saa.config.SessionConfig;
 import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
-import com.openmanus.saa.model.session.CompactionResult;
-import com.openmanus.saa.model.session.SessionState;
-import com.openmanus.saa.model.session.SessionStateResponse;
+import com.openmanus.saa.model.session.*;
 import com.openmanus.saa.service.session.storage.SessionStorage;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,12 +48,16 @@ public class SessionMemoryService {
             // 自动压缩检查
             if (config.isCompactionEnabled()) {
                 if (compactor.shouldCompact(session, config.getCompaction())) {
-                    CompactionResult result = compactor.compact(session, config.getCompaction());
+                    // 使用新的 Session API 进行压缩
+                    Session newSession = convertToSession(session);
+                    CompactionResult result = compactor.compactSession(newSession, config.getCompaction());
                     if (result.wasCompacted()) {
-                        storage.save(result.compactedSession());
+                        // 将压缩后的 Session 转换回 SessionState
+                        SessionState compactedState = convertToSessionState(result.compactedSession());
+                        storage.save(compactedState);
                         log.info("Auto-compacted session {}: {} messages removed",
                             resolvedId, result.removedMessageCount());
-                        return result.compactedSession();
+                        return compactedState;
                     }
                 }
             }
@@ -62,6 +66,45 @@ public class SessionMemoryService {
         }
 
         return storage.save(new SessionState(resolvedId));
+    }
+
+    /**
+     * 将 SessionState 转换为 Session
+     */
+    private Session convertToSession(SessionState state) {
+        return new Session(
+            1,
+            state.getSessionId(),
+            state.getCreatedAt(),
+            state.getUpdatedAt(),
+            state.getLastAccessedAt(),
+            new ArrayList<>(state.getMessages()),
+            new HashMap<>(),
+            new ArrayList<>(state.getExecutionLog()),
+            TokenUsage.zero(),
+            state.getLatestInferencePolicy(),
+            state.getLatestResponseMode()
+        );
+    }
+
+    /**
+     * 将 Session 转换为 SessionState
+     */
+    private SessionState convertToSessionState(Session session) {
+        SessionState state = new SessionState(session.sessionId());
+        for (ConversationMessage msg : session.messages()) {
+            state.addMessage(msg);
+        }
+        for (String logEntry : session.executionLog()) {
+            state.addExecutionLog(logEntry);
+        }
+        if (session.latestInferencePolicy() != null) {
+            state.setLatestInferencePolicy(session.latestInferencePolicy());
+        }
+        if (session.latestResponseMode() != null) {
+            state.setLatestResponseMode(session.latestResponseMode());
+        }
+        return state;
     }
 
     /**
@@ -139,9 +182,18 @@ public class SessionMemoryService {
         SessionState session = storage.findById(sessionId)
             .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
-        CompactionResult result = compactor.compact(session, config.getCompaction());
+        Session newSession = convertToSession(session);
+        CompactionResult result = compactor.compactSession(newSession, config.getCompaction());
         if (result.wasCompacted()) {
-            storage.save(result.compactedSession());
+            SessionState compactedState = convertToSessionState(result.compactedSession());
+            storage.save(compactedState);
+            // 返回包含 SessionState 转换的结果
+            return new CompactionResult(
+                result.summary(),
+                result.formattedSummary(),
+                convertToSession(compactedState),
+                result.removedMessageCount()
+            );
         }
         return result;
     }
