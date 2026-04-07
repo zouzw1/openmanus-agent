@@ -48,8 +48,8 @@ public class SessionCompactor {
         int startIndex = session.getCompactedSummary().isPresent() ? 1 : 0;
         int compactableCount = session.getMessages().size() - startIndex;
 
-        return compactableCount > config.getPreserveRecentMessages()
-            && estimateTokens(session) >= config.getMaxEstimatedTokens();
+        return compactableCount > config.preserveRecentMessages()
+            && estimateTokens(session) >= config.maxEstimatedTokens();
     }
 
     /**
@@ -65,7 +65,7 @@ public class SessionCompactor {
 
         // 1. 计算保留边界
         int prefixLen = session.getCompactedSummary().isPresent() ? 1 : 0;
-        int keepFrom = session.getMessages().size() - config.getPreserveRecentMessages();
+        int keepFrom = session.getMessages().size() - config.preserveRecentMessages();
 
         // 2. 提取待压缩消息
         List<ConversationMessage> toCompress =
