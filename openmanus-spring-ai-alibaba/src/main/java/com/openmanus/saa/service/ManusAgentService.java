@@ -87,6 +87,7 @@ public class ManusAgentService {
             case DIRECT_CHAT -> chat(sessionId, prompt, firstNonBlank(agentId, intentResolution.preferredAgentId()));
             case PLAN_EXECUTE -> executeWithPlan(sessionId, prompt, intentResolution);
             case MULTI_AGENT -> executeMultiAgent(sessionId, prompt);
+            case CONTINUE -> continuePausedWorkflow(sessionId, prompt, intentResolution);
         };
     }
 
@@ -105,6 +106,7 @@ public class ManusAgentService {
             case DIRECT_CHAT -> chat(request.sessionId(), request.prompt(), firstNonBlank(request.agentId(), resolution.preferredAgentId()));
             case PLAN_EXECUTE -> executeWithPlan(request.sessionId(), request.prompt(), resolution);
             case MULTI_AGENT -> executeMultiAgent(request.sessionId(), request.prompt(), request.tasks());
+            case CONTINUE -> continuePausedWorkflow(request.sessionId(), request.prompt(), resolution);
         };
     }
 
@@ -199,6 +201,16 @@ public class ManusAgentService {
     }
 
     /**
+     * Continue a paused workflow with user feedback.
+     */
+    private AgentResponse continuePausedWorkflow(String sessionId, String prompt, IntentResolution resolution) {
+        log.info("Continuing paused workflow for session {} with feedback: {}", sessionId, prompt);
+        // For now, route to normal chat with context of paused workflow
+        // This will be enhanced when HumanFeedbackResolutionService integration is complete
+        return chat(sessionId, prompt, null);
+    }
+
+    /**
      * Execute using multi-agent mode.
      */
     public AgentResponse executeMultiAgent(String sessionId, String objective) {
@@ -261,6 +273,9 @@ public class ManusAgentService {
                     }
                     case MULTI_AGENT -> {
                         response = executeMultiAgentStream(emitter, sessionId, prompt);
+                    }
+                    case CONTINUE -> {
+                        response = continuePausedWorkflow(sessionId, prompt, resolution);
                     }
                     default -> {
                         response = chat(sessionId, prompt, agentId);
