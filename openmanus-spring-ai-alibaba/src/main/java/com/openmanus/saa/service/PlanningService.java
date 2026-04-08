@@ -11,8 +11,10 @@ import com.openmanus.saa.model.SkillInfoResponse;
 import com.openmanus.saa.model.ToolMetadata;
 import com.openmanus.saa.model.mcp.McpToolMetadata;
 import com.openmanus.saa.model.WorkflowStep;
+import com.openmanus.saa.model.context.ConversationContext;
 import com.openmanus.saa.service.mcp.McpService;
 import com.openmanus.saa.service.mcp.McpPromptContextService;
+import com.openmanus.saa.util.IntentResolutionHelper;
 import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -118,8 +120,20 @@ public class PlanningService {
             List<AgentCapabilitySnapshot> agentSnapshots,
             IntentResolution intentResolution
     ) {
+        return createWorkflowPlan(objective, agentSnapshots, intentResolution, null);
+    }
+
+    /**
+     * 创建工作流计划（带对话上下文）。
+     */
+    public List<WorkflowStep> createWorkflowPlan(
+            String objective,
+            List<AgentCapabilitySnapshot> agentSnapshots,
+            IntentResolution intentResolution,
+            ConversationContext context
+    ) {
         validateObjectiveCapabilitySupportOrThrow(objective, agentSnapshots);
-        DraftPlan draftPlan = createWorkflowDraft(objective, agentSnapshots, intentResolution);
+        DraftPlan draftPlan = createWorkflowDraft(objective, agentSnapshots, intentResolution, context);
         draftPlan.lintWarnings().forEach(warning -> log.warn("Workflow draft lint: {}", warning));
         return compileWorkflowPlan(objective, draftPlan.steps(), agentSnapshots);
     }
@@ -129,6 +143,15 @@ public class PlanningService {
             List<AgentCapabilitySnapshot> agentSnapshots,
             IntentResolution intentResolution
     ) {
+        return createWorkflowDraft(objective, agentSnapshots, intentResolution, null);
+    }
+
+    private DraftPlan createWorkflowDraft(
+            String objective,
+            List<AgentCapabilitySnapshot> agentSnapshots,
+            IntentResolution intentResolution,
+            ConversationContext context
+    ) {
         String toolsSchema = buildPlanningToolGuidance();
         String languageDirective = ResponseLanguageHelper.responseDirective(objective);
         String availableAgents = buildAgentCapabilityPrompt(agentSnapshots);
@@ -137,6 +160,7 @@ public class PlanningService {
                 .filter(agentId -> agentId != null && !agentId.isBlank())
                 .collect(Collectors.toSet());
         String intentContext = buildIntentPlanningContext(intentResolution);
+        String conversationContext = buildConversationContextPrompt(context);
 
         String content = chatClient.prompt()
                 .system("""
@@ -156,25 +180,29 @@ public class PlanningService {
                         Intent context:
                         %s
 
+                        %s
+
                         AVAILABLE TOOLS AND THEIR SCHEMAS:
                         %s
 
                         IMPORTANT PLANNING RULES:
                         1. Each step must be one executable action.
                         2. The "agent" field MUST be one of the available agents, never a tool name.
-                        3. Never output meta steps such as "we need to..." or "the first step is...".
-                        4. Never restate the task as a step.
-                        5. If a required parameter cannot be obtained, create at most one explicit clarification step.
-                        6. Do not repeat the same tool call for the same target unless the task explicitly requires it.
-                        7. Do not invent pseudo-parameter names, slot names, aliases, or fake schema fields inside step descriptions.
-                        8. If information is missing, describe the missing information in plain language.
-                        9. When the task explicitly asks for a formatted Word, PDF, PPTX, or similar deliverable and an appropriate skill is available, prefer a step that uses that skill instead of a plain text file write.
-                        10. Separate collection, composition, and export work into different steps when the final deliverable requires transformation.
-                         11. Before any export/render/convert step for a non-text deliverable, include an earlier step that composes the source content or writes a draft artifact.
-                         12. Do not use export/render skills such as docx/pdf/pptx to invent the underlying content plan; use a drafting/composition step first.
-                         13. Only add a final export or file-writing delivery step when the user explicitly requests a file/document/export/save-to-workspace result or a specific output format.
-                         14. Only reference tools, MCP tools, and skills that are explicitly available in the capability list and tool guidance above.
-                         15. Never propose a fake office deliverable such as writing plain text into a .docx/.pdf/.pptx file when the required export capability is unavailable.
+                        3. CRITICAL: Before assigning an agent to a step, verify that the agent has the required tools. Check the localTools list for each agent.
+                        4. Never assign an agent to a step if that agent does not have the tools needed for that step.
+                        5. Never output meta steps such as "we need to..." or "the first step is...".
+                        6. Never restate the task as a step.
+                        7. If a required parameter cannot be obtained, create at most one explicit clarification step.
+                        8. Do not repeat the same tool call for the same target unless the task explicitly requires it.
+                        9. Do not invent pseudo-parameter names, slot names, aliases, or fake schema fields inside step descriptions.
+                        10. If information is missing, describe the missing information in plain language.
+                        11. When the task explicitly asks for a formatted Word, PDF, PPTX, or similar deliverable and an appropriate skill is available, prefer a step that uses that skill instead of a plain text file write.
+                        12. Separate collection, composition, and export work into different steps when the final deliverable requires transformation.
+                         13. Before any export/render/convert step for a non-text deliverable, include an earlier step that composes the source content or writes a draft artifact.
+                         14. Do not use export/render skills such as docx/pdf/pptx to invent the underlying content plan; use a drafting/composition step first.
+                         15. Only add a final export or file-writing delivery step when the user explicitly requests a file/document/export/save-to-workspace result or a specific output format.
+                         16. Only reference tools, MCP tools, and skills that are explicitly available in the capability list and tool guidance above.
+                         17. Never propose a fake office deliverable such as writing plain text into a .docx/.pdf/.pptx file when the required export capability is unavailable.
 
                          Return JSON only as an array.
                          Each item must follow this schema:
@@ -184,7 +212,7 @@ public class PlanningService {
                         }
 
                         %s
-                        """.formatted(availableAgents, intentContext, toolsSchema, languageDirective))
+                        """.formatted(availableAgents, intentContext, conversationContext, toolsSchema, languageDirective))
                 .user("""
                         Task: %s
 
@@ -199,6 +227,35 @@ public class PlanningService {
         return new DraftPlan(sanitizedSteps, lintWorkflowDraft(parsedSteps, sanitizedSteps));
     }
 
+    /**
+     * 构建对话上下文提示。
+     */
+    private String buildConversationContextPrompt(ConversationContext context) {
+        if (context == null) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        // 对话历史
+        if (context.conversationHistory() != null && !context.conversationHistory().isBlank()) {
+            sb.append("CONVERSATION HISTORY:\n")
+              .append(context.conversationHistory())
+              .append("\n\n");
+        }
+
+        // 用户偏好
+        if (context.hasUserPreferences()) {
+            sb.append("USER PREFERENCES:\n");
+            context.userPreferences().forEach((key, value) ->
+                sb.append("- ").append(key).append(": ").append(value).append("\n")
+            );
+            sb.append("\n");
+        }
+
+        return sb.toString();
+    }
+
     private String buildIntentPlanningContext(IntentResolution intentResolution) {
         if (intentResolution == null) {
             return "- No explicit intent context was provided. Use only the user objective.";
@@ -207,8 +264,49 @@ public class PlanningService {
         builder.append("- intentId: ").append(intentResolution.intentId()).append("\n")
                 .append("- routeMode: ").append(intentResolution.routeMode()).append("\n")
                 .append("- preferredAgentId: ").append(intentResolution.preferredAgentId() == null ? "none" : intentResolution.preferredAgentId()).append("\n");
+
+        // 输出期望
+        boolean needsFile = IntentResolutionHelper.needsFile(intentResolution);
+        String userFormat = IntentResolutionHelper.getUserSpecifiedFormat(intentResolution);
+        String reason = IntentResolutionHelper.getReason(intentResolution);
+        builder.append("- outputExpectation:\n");
+        builder.append("  - needsFile: ").append(needsFile).append("\n");
+        if (userFormat != null) {
+            builder.append("  - userSpecifiedFormat: ").append(userFormat).append("\n");
+        }
+        if (reason != null) {
+            builder.append("  - reason: ").append(reason).append("\n");
+        }
+
+        // 输出指导
+        builder.append("- outputGuidance: ");
+        if (needsFile) {
+            builder.append("The user expects the result as a file deliverable. ");
+            if (userFormat != null) {
+                builder.append("Format specified: ").append(userFormat).append(". ");
+            }
+            builder.append("Ensure the workflow includes a final step to compose and export the deliverable.\n");
+        } else {
+            builder.append("The user expects the result as text/markdown output, not a file. ");
+            builder.append("CRITICAL: After data collection steps, you MUST include a final 'compose' step that integrates ALL collected information into the user's requested deliverable. ");
+            builder.append("Assign this compose step to the 'manus' agent which has composition capabilities. ");
+            builder.append("Do NOT just collect data - the workflow must end with a step that generates the actual plan/itinerary/report the user asked for.\n");
+        }
+
+        builder.append("\nWORKFLOW STRUCTURE REQUIREMENT:\n");
+        builder.append("- For any task that requires generating a plan, report, or recommendation: include both 'collection' steps AND a final 'compose' step.\n");
+        builder.append("- Collection steps: gather data using specialized tools (attractions, weather, budget, etc.)\n");
+        builder.append("- Compose step: integrate collected data into the final deliverable. This step should be assigned to 'manus' agent.\n");
+        builder.append("- Example: For a travel plan request -> Step 1: search attractions, Step 2: check weather, Step 3: COMPOSE the detailed itinerary (manus agent)\n");
+
         if (intentResolution.attributes() != null && !intentResolution.attributes().isEmpty()) {
-            builder.append("- attributes: ").append(intentResolution.attributes()).append("\n");
+            // 过滤掉已处理的 outputExpectation
+            Map<String, Object> otherAttributes = new LinkedHashMap<>(intentResolution.attributes());
+            otherAttributes.remove("outputExpectation");
+            otherAttributes.remove("responseMode");
+            if (!otherAttributes.isEmpty()) {
+                builder.append("- otherAttributes: ").append(otherAttributes).append("\n");
+            }
         }
         if (intentResolution.planningHints() != null && !intentResolution.planningHints().isEmpty()) {
             builder.append("- planningHints:\n");
@@ -219,6 +317,7 @@ public class PlanningService {
             builder.append("- planningHints: none\n");
         }
         builder.append("- Treat preferredAgentId and planningHints as strong routing hints when they match the available capabilities.");
+        builder.append("- Follow outputGuidance strictly to determine whether to produce file artifacts or text output.");
         return builder.toString().trim();
     }
 
@@ -374,11 +473,14 @@ public class PlanningService {
                         Step description: %s
                         Original objective: %s
 
-                        Based on the available tools schema, identify:
-                        1. Which tool(s) are needed for this step?
-                        2. What parameters can be extracted from the context?
-                        3. Use ONLY exact tool names and exact parameter names from the provided schemas.
-                        4. If a parameter name is not explicitly defined in the tool schema, do not invent an alias.
+                        IMPORTANT - Tool Extraction Rules:
+                        1. Only extract tools that are DIRECTLY needed to execute THIS specific step.
+                        2. Do NOT include tools that were used in PREVIOUS steps (e.g., if step says "combine the results from step X", only include the combining tool, not the tools from step X).
+                        3. Do NOT include tools that will be used in FUTURE steps.
+                        4. For "combine", "merge", or "compose" steps, typically only writeWorkspaceFile is needed.
+                        5. For "convert to PDF" steps, use markdownToPdf or htmlToPdf.
+                        6. Use ONLY exact tool names and exact parameter names from the provided schemas.
+                        7. If a parameter name is not explicitly defined in the tool schema, do not invent an alias.
 
                         Return ONLY a JSON object in this exact format:
                         {
@@ -739,6 +841,11 @@ public class PlanningService {
 
     private String buildPlanningToolGuidance() {
         return toolRegistryService.generateEnabledToolsPromptGuidance()
+                + "\n\nTOOL SELECTION PRECEDENCE (CRITICAL):\n"
+                + "1. If a tool name exists in LOCAL TOOLS list, ALWAYS use it directly in requiredTools.\n"
+                + "2. NEVER wrap a local tool name inside callMcpTool.\n"
+                + "3. Only use callMcpTool for tools that ONLY exist on MCP servers (not in local tools).\n"
+                + "4. Local tools = Java implementation = faster, more reliable, no external dependencies.\n"
                 + "\n\nPLANNING DISAMBIGUATION RULES:\n"
                 + "- If a tool name exists in the local tool list, use that exact local tool name directly in requiredTools.\n"
                 + "- Do NOT wrap a local tool inside callMcpTool.\n"
@@ -769,13 +876,16 @@ public class PlanningService {
             return;
         }
 
+        // Always prefer local tool over MCP tool when a name collision exists.
+        // Local tools are Java implementations with better reliability and no external dependencies.
         String serverId = Optional.ofNullable(parameters.get("serverId"))
                 .map(Object::toString)
                 .orElse("")
                 .trim();
         boolean mcpToolExists = !serverId.isBlank() && mcpService.findToolMetadata(serverId, normalizedToolName).isPresent();
         if (mcpToolExists) {
-            return;
+            log.info("Tool name collision detected: '{}' exists as both LOCAL and MCP. Preferring LOCAL tool.",
+                    normalizedToolName);
         }
 
         Map<String, Object> extractedArguments = parseToolArguments(parameters.get("argumentsJson"));
@@ -802,6 +912,7 @@ public class PlanningService {
         parameters.putAll(normalizedParameters);
         requiredTools.remove("callMcpTool");
         requiredTools.add(normalizedToolName);
+        log.debug("Normalized misclassified tool invocation: callMcpTool({}) -> {}", toolName, normalizedToolName);
     }
 
     private Map<String, Object> parseToolArguments(Object argumentsJsonValue) {
@@ -1689,6 +1800,14 @@ public class PlanningService {
         if (isTextDraftFormat(format)) {
             return agentSnapshots != null && agentSnapshots.stream().anyMatch(snapshot -> snapshot.hasLocalTool("writeWorkspaceFile"));
         }
+        // Check local tools for PDF support
+        if ("pdf".equalsIgnoreCase(format)) {
+            return agentSnapshots != null && agentSnapshots.stream()
+                    .anyMatch(snapshot -> snapshot.hasLocalTool("markdownToPdf")
+                            || snapshot.hasLocalTool("htmlToPdf")
+                            || snapshot.hasLocalTool("markdownFileToPdf"));
+        }
+        // Check skills for other formats
         return skillCapabilityService.listAvailableCapabilities().stream()
                 .anyMatch(capability -> capability.outputFormats().contains(format));
     }
@@ -1702,6 +1821,14 @@ public class PlanningService {
             return requiredTools.contains("writeWorkspaceFile")
                     && requestedDeliverableFormat.equals(inferStepTargetFormat(step));
         }
+        // Check for PDF via local tools
+        if ("pdf".equalsIgnoreCase(requestedDeliverableFormat)) {
+            List<String> requiredTools = step.requiredTools() == null ? List.of() : step.requiredTools();
+            return requiredTools.contains("markdownToPdf")
+                    || requiredTools.contains("htmlToPdf")
+                    || requiredTools.contains("markdownFileToPdf");
+        }
+        // Check skills for other formats
         String skillName = declaredSkillName(step);
         return skillName != null && supportedOutputFormatsForSkill(skillName).contains(requestedDeliverableFormat);
     }
