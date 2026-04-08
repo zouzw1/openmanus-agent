@@ -3,9 +3,11 @@ package com.openmanus.saa.service.session;
 import com.openmanus.saa.config.SessionConfig;
 import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
+import com.openmanus.saa.model.context.WorkflowState;
 import com.openmanus.saa.model.session.*;
 import com.openmanus.saa.service.session.storage.SessionStorage;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +22,8 @@ import org.springframework.stereotype.Service;
 public class SessionMemoryService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionMemoryService.class);
+    private static final String USER_PREFERENCES_KEY = "userPreferences";
+    private static final String WORKFLOW_STATE_KEY = "workflowState";
 
     private final SessionStorage storage;
     private final SessionCompactor compactor;
@@ -103,20 +107,114 @@ public class SessionMemoryService {
     }
 
     public void savePendingFeedback(String sessionId, HumanFeedbackRequest request) {
+        Session session = storage.findById(sessionId)
+            .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+        WorkflowState state = WorkflowState.paused(
+            request.getObjective(),
+            request.getPlanId(),
+            request.getStepIndex(),
+            request.getSteps(),
+            request
+        );
+
+        Session updated = session.putMemory(WORKFLOW_STATE_KEY, state);
+        storage.save(updated);
+
         log.info("Saved pending feedback for session {}: stepIndex={}, objective='{}'",
             sessionId, request.getStepIndex(), request.getObjective());
     }
 
     public Optional<HumanFeedbackRequest> getPendingFeedback(String sessionId) {
-        return Optional.empty();
+        return getWorkflowState(sessionId)
+            .filter(WorkflowState::isPaused)
+            .map(WorkflowState::pendingFeedback);
     }
 
     public void clearPendingFeedback(String sessionId) {
+        clearWorkflowState(sessionId);
         log.info("Cleared pending feedback for session {}", sessionId);
     }
 
     public boolean hasPendingFeedback(String sessionId) {
-        return false;
+        return getWorkflowState(sessionId)
+            .map(WorkflowState::isPaused)
+            .orElse(false);
+    }
+
+    // ========== 用户偏好 ==========
+
+    /**
+     * 保存用户偏好到 Session workingMemory。
+     */
+    public Session saveUserPreference(String sessionId, String key, Object value) {
+        Session session = storage.findById(sessionId)
+            .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> prefs = session.getMemory(USER_PREFERENCES_KEY, Map.class)
+            .orElse(new HashMap<>());
+
+        Map<String, Object> newPrefs = new HashMap<>(prefs);
+        newPrefs.put(key, value);
+
+        Session updated = session.putMemory(USER_PREFERENCES_KEY, Map.copyOf(newPrefs));
+        return storage.save(updated);
+    }
+
+    /**
+     * 获取用户偏好。
+     */
+    public Optional<Object> getUserPreference(String sessionId, String key) {
+        return storage.findById(sessionId)
+            .flatMap(session -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> prefs = session.getMemory(USER_PREFERENCES_KEY, Map.class).orElse(null);
+                if (prefs == null) return Optional.empty();
+                return Optional.ofNullable(prefs.get(key));
+            });
+    }
+
+    /**
+     * 获取所有用户偏好。
+     */
+    public Map<String, Object> getUserPreferences(String sessionId) {
+        return storage.findById(sessionId)
+            .flatMap(session -> session.getMemory(USER_PREFERENCES_KEY, Map.class))
+            .orElse(Map.of());
+    }
+
+    // ========== 工作流状态 ==========
+
+    /**
+     * 保存工作流状态到 Session workingMemory。
+     */
+    public void saveWorkflowState(String sessionId, WorkflowState state) {
+        Session session = storage.findById(sessionId)
+            .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+        Session updated = session.putMemory(WORKFLOW_STATE_KEY, state);
+        storage.save(updated);
+        log.debug("Saved workflow state for session {}: {}", sessionId, state.status());
+    }
+
+    /**
+     * 获取工作流状态。
+     */
+    public Optional<WorkflowState> getWorkflowState(String sessionId) {
+        return storage.findById(sessionId)
+            .flatMap(session -> session.getMemory(WORKFLOW_STATE_KEY, WorkflowState.class));
+    }
+
+    /**
+     * 清除工作流状态。
+     */
+    public void clearWorkflowState(String sessionId) {
+        Session session = storage.findById(sessionId).orElse(null);
+        if (session != null) {
+            Session updated = session.removeMemory(WORKFLOW_STATE_KEY);
+            storage.save(updated);
+            log.debug("Cleared workflow state for session {}", sessionId);
+        }
     }
 
     public void processFeedback(String sessionId, HumanFeedbackResponse feedback) {
