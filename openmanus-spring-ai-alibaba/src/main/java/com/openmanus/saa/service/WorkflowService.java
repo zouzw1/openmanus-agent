@@ -22,6 +22,7 @@ import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowExecutionStatus;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.model.WorkflowSummary;
+import com.openmanus.saa.model.context.WorkflowState;
 import com.openmanus.saa.model.session.Session;
 import com.openmanus.saa.service.agent.AgentExecutionResult;
 import com.openmanus.saa.service.agent.SpecialistAgent;
@@ -33,6 +34,7 @@ import com.openmanus.saa.service.summary.WorkflowSummaryFormatter;
 import com.openmanus.saa.service.supervisor.MultiAgentExecutionResponse;
 import com.openmanus.saa.service.supervisor.SupervisorAgentService;
 import com.openmanus.saa.tool.PlanningTools;
+import com.openmanus.saa.util.IntentResolutionHelper;
 import com.openmanus.saa.util.ParameterMissingDetector;
 import com.openmanus.saa.util.ResponseLanguageHelper;
 import java.nio.file.Files;
@@ -482,15 +484,32 @@ public class WorkflowService {
             List<WorkflowStep> executedSteps,
             ResponseMode responseMode
     ) {
+        return finalizeSuccessfulExecution(sessionId, planId, objective, executedSteps, responseMode, null);
+    }
+
+    WorkflowExecutionResponse finalizeSuccessfulExecution(
+            String sessionId,
+            String planId,
+            String objective,
+            List<WorkflowStep> executedSteps,
+            ResponseMode responseMode,
+            IntentResolution intentResolution
+    ) {
         WorkflowExecutionResponse response = graphOrchestrator.invokeOutputEvaluationGraph(
                 sessionId,
                 planId,
                 objective,
                 executedSteps,
-                responseMode
+                responseMode,
+                intentResolution
         );
         Session session = sessionMemoryService.getOrCreate(sessionId);
-        sessionMemoryService.saveSession(session.addAssistantMessage(response.summary().userMessage()));
+        sessionMemoryService.saveSession(session.addAssistantMessage(response.content()));
+
+        // 更新工作流状态为 COMPLETED
+        String deliverable = response.deliverable();
+        sessionMemoryService.saveWorkflowState(sessionId, WorkflowState.completed(objective, planId, deliverable));
+
         return response;
     }
 
@@ -574,7 +593,7 @@ public class WorkflowService {
                         pendingFeedback.getErrorMessage()
                 )
         );
-        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+        String content = formatSummaryMessage(new WorkflowSummaryContext(
                 pendingFeedback.getObjective(),
                 WorkflowExecutionStatus.ABORTED,
                 pendingFeedback.getFailedStep().getDescription(),
@@ -590,19 +609,19 @@ public class WorkflowService {
                 allSteps,
                 WorkflowExecutionStatus.ABORTED,
                 pendingFeedback.getFailedStep().getDescription(),
-                userMessage
+                null
         );
 
         Session session = sessionMemoryService.getOrCreate(sessionId);
-        sessionMemoryService.saveSession(session.addAssistantMessage(summary.userMessage()));
+        sessionMemoryService.saveSession(session.addAssistantMessage(content));
 
         return new WorkflowExecutionResponse(
                 pendingFeedback.getObjective(),
-                allSteps,
+                null,  // deliverable
+                content,
                 collectResponseArtifacts(allSteps),
-                executionLog,
                 summary,
-                null,
+                allSteps,
                 null
         );
     }
@@ -2196,7 +2215,7 @@ public class WorkflowService {
                         + "\u5982\u9700\u663e\u5f0f\u63a7\u5236\uff0c\u4ecd\u652f\u6301 action: PROVIDE_INFO, MODIFY_AND_RETRY, RETRY, SKIP_STEP, ABORT_PLAN"
                 : "You can submit natural-language feedback such as \"retry with corrected parameters\", \"skip this step\", or \"end the workflow\".\n"
                         + "Explicit action is still supported: PROVIDE_INFO, MODIFY_AND_RETRY, RETRY, SKIP_STEP, ABORT_PLAN");
-        String formattedMessage = formatSummaryMessage(new WorkflowSummaryContext(
+        String content = formatSummaryMessage(new WorkflowSummaryContext(
                 objective,
                 WorkflowExecutionStatus.NEEDS_HUMAN_INTERVENTION,
                 pendingFeedback.getFailedStep().getDescription(),
@@ -2212,17 +2231,17 @@ public class WorkflowService {
                 executedSteps,
                 WorkflowExecutionStatus.NEEDS_HUMAN_INTERVENTION,
                 pendingFeedback.getFailedStep().getDescription(),
-                formattedMessage
+                outputEvaluation
         );
 
         return new WorkflowExecutionResponse(
                 objective,
-                executedSteps,
+                null,
+                content,
                 collectResponseArtifacts(executedSteps),
-                toExecutionLog(executedSteps),
                 summary,
-                pendingFeedback,
-                outputEvaluation
+                executedSteps,
+                pendingFeedback
         );
     }
 
@@ -2255,7 +2274,7 @@ public class WorkflowService {
                         failedStep.getErrorMessage()
                 )
         );
-        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+        String content = formatSummaryMessage(new WorkflowSummaryContext(
                 objective,
                 WorkflowExecutionStatus.FAILED,
                 failedStep.getDescription(),
@@ -2266,15 +2285,19 @@ public class WorkflowService {
                 artifacts,
                 executionLog
         ));
+
+        // 尝试从已有成功步骤生成 deliverable
+        String deliverable = generateDeliverable(objective, executedSteps, artifacts, ResponseMode.FINAL_DELIVERABLE);
+
         WorkflowSummary summary = buildSummary(
                 objective,
                 executedSteps,
                 WorkflowExecutionStatus.FAILED,
                 failedStep.getDescription(),
-                userMessage
+                outputEvaluation
         );
 
-        return new WorkflowExecutionResponse(objective, executedSteps, artifacts, executionLog, summary, null, outputEvaluation);
+        return new WorkflowExecutionResponse(objective, deliverable, content, artifacts, summary, executedSteps, null);
     }
 
     WorkflowExecutionResponse createCompletedResponse(
@@ -2283,36 +2306,125 @@ public class WorkflowService {
             ResponseMode responseMode,
             OutputEvaluationResult outputEvaluation
     ) {
-        List<String> executionLog = toExecutionLog(executedSteps);
+        return createCompletedResponse(objective, executedSteps, responseMode, outputEvaluation, null);
+    }
+
+    WorkflowExecutionResponse createCompletedResponse(
+            String objective,
+            List<WorkflowStep> executedSteps,
+            ResponseMode responseMode,
+            OutputEvaluationResult outputEvaluation,
+            IntentResolution intentResolution
+    ) {
         List<String> responseArtifacts = collectResponseArtifacts(executedSteps);
-        String userMessage = formatSummaryMessage(new WorkflowSummaryContext(
+
+        // 根据 needsFile 调整响应模式
+        boolean needsFile = intentResolution != null && IntentResolutionHelper.needsFile(intentResolution);
+        ResponseMode effectiveMode = responseMode;
+        if (needsFile && responseMode == ResponseMode.WORKFLOW_SUMMARY) {
+            effectiveMode = ResponseMode.FINAL_DELIVERABLE;
+        }
+
+        // 生成 deliverable（最终交付内容）
+        String deliverable = generateDeliverable(objective, executedSteps, responseArtifacts, effectiveMode);
+
+        // 生成 content（详细执行报告）
+        String content = formatWorkflowExecutionMarkdown(
                 objective,
-                WorkflowExecutionStatus.COMPLETED,
-                null,
-                summarizeWorkflow(objective, executedSteps, responseArtifacts, executionLog, responseMode),
-                null,
-                null,
                 executedSteps,
                 responseArtifacts,
-                executionLog
-        ));
-        userMessage = appendOutputEvaluationNote(objective, userMessage, outputEvaluation);
+                toExecutionLog(executedSteps),
+                null,  // summary will be built later
+                null,
+                outputEvaluation
+        );
+
+        // 如果需要文件但在 artifacts 中没有产物，添加提示
+        if (needsFile && (responseArtifacts == null || responseArtifacts.isEmpty())) {
+            String missingArtifactNote = ResponseLanguageHelper.choose(
+                    objective,
+                    "\n\n⚠️ 提示：您请求了文件输出，但当前未检测到可交付的产物。请检查执行步骤是否包含文件生成操作。",
+                    "\n\n⚠️ Note: You requested file output, but no deliverable artifacts were detected. Please verify that the execution steps include file generation operations."
+            );
+            content = content + missingArtifactNote;
+        }
+
         WorkflowSummary summary = buildSummary(
                 objective,
                 executedSteps,
                 WorkflowExecutionStatus.COMPLETED,
                 null,
-                userMessage
+                outputEvaluation
         );
         return new WorkflowExecutionResponse(
                 objective,
-                executedSteps,
+                deliverable,
+                content,
                 responseArtifacts,
-                executionLog,
                 summary,
-                null,
-                outputEvaluation
+                executedSteps,
+                null
         );
+    }
+
+    /**
+     * 生成最终交付内容
+     * 尝试从已完成的步骤中整合数据
+     */
+    private String generateDeliverable(
+            String objective,
+            List<WorkflowStep> steps,
+            List<String> artifacts,
+            ResponseMode responseMode
+    ) {
+        if (responseMode == ResponseMode.WORKFLOW_SUMMARY) {
+            return null; // 摘要模式不生成 deliverable
+        }
+
+        // 收集所有成功步骤的结果
+        List<String> completedResults = new ArrayList<>();
+        for (WorkflowStep step : steps) {
+            if (step != null && step.isCompleted() && step.getResult() != null && !step.getResult().isBlank()) {
+                completedResults.add(step.getResult().trim());
+            }
+        }
+
+        if (!completedResults.isEmpty()) {
+            // 如果只有一个结果，直接返回
+            if (completedResults.size() == 1) {
+                return completedResults.get(0);
+            }
+
+            // 多个结果时，整合输出
+            boolean chinese = ResponseLanguageHelper.detect(objective) == ResponseLanguageHelper.Language.ZH_CN;
+            StringBuilder sb = new StringBuilder();
+
+            if (chinese) {
+                sb.append("## 执行结果汇总\n\n");
+            } else {
+                sb.append("## Execution Summary\n\n");
+            }
+
+            for (int i = 0; i < completedResults.size(); i++) {
+                sb.append(completedResults.get(i));
+                if (i < completedResults.size() - 1) {
+                    sb.append("\n\n");
+                }
+            }
+
+            return sb.toString();
+        }
+
+        // 如果有 artifacts，返回产物列表
+        if (artifacts != null && !artifacts.isEmpty()) {
+            return ResponseLanguageHelper.choose(
+                    objective,
+                    "已生成产物：\n- " + String.join("\n- ", artifacts),
+                    "Artifacts generated:\n- " + String.join("\n- ", artifacts)
+            );
+        }
+
+        return null;
     }
 
     WorkflowExecutionResponse createOutputEvaluationFailureResponse(
@@ -2343,31 +2455,32 @@ public class WorkflowService {
                         retryNote
                 )
         );
+        String content = formatSummaryMessage(new WorkflowSummaryContext(
+                objective,
+                WorkflowExecutionStatus.FAILED,
+                currentStep,
+                baseMessage,
+                null,
+                null,
+                executedSteps,
+                artifacts,
+                executionLog
+        ));
         WorkflowSummary summary = buildSummary(
                 objective,
                 executedSteps,
                 WorkflowExecutionStatus.FAILED,
                 currentStep,
-                formatSummaryMessage(new WorkflowSummaryContext(
-                        objective,
-                        WorkflowExecutionStatus.FAILED,
-                        currentStep,
-                        baseMessage,
-                        null,
-                        null,
-                        executedSteps,
-                        artifacts,
-                        executionLog
-                ))
+                outputEvaluation
         );
         return new WorkflowExecutionResponse(
                 objective,
-                executedSteps,
-                artifacts,
-                executionLog,
-                summary,
                 null,
-                outputEvaluation
+                content,
+                artifacts,
+                summary,
+                executedSteps,
+                null
         );
     }
 
@@ -2377,17 +2490,11 @@ public class WorkflowService {
                 : response.steps().stream().map(WorkflowStep::getDescription).toList();
         List<WorkflowStep> workflowSteps = response.steps() == null ? List.of() : response.steps();
         List<String> artifacts = response.artifacts() == null ? List.of() : response.artifacts();
-        List<String> executionLog = response.executionLog() == null ? List.of() : response.executionLog();
-        String content = formatWorkflowExecutionMarkdown(
-                response.objective(),
-                workflowSteps,
-                artifacts,
-                executionLog,
-                response.summary(),
-                response.pendingFeedback(),
-                response.outputEvaluation()
-        );
-        String summary = response.summary() == null ? null : response.summary().userMessage();
+
+        // deliverable 作为 summary，content 作为详细内容
+        String summary = response.deliverable();
+        String content = response.content();
+
         return new AgentResponse(
                 "plan-execute",
                 response.objective(),
@@ -2396,10 +2503,10 @@ public class WorkflowService {
                 planSteps,
                 workflowSteps,
                 artifacts,
-                executionLog,
+                List.of(),  // executionLog 已合并到 content
                 response.summary(),
                 response.pendingFeedback(),
-                response.outputEvaluation()
+                null  // outputEvaluation 已合并到 summary
         );
     }
 
@@ -2424,7 +2531,7 @@ public class WorkflowService {
             List<WorkflowStep> steps,
             WorkflowExecutionStatus status,
             String currentStep,
-            String userMessage
+            OutputEvaluationResult outputEvaluation
     ) {
         int totalSteps = steps.size();
         int completedSteps = (int) steps.stream()
@@ -2439,16 +2546,24 @@ public class WorkflowService {
                         || step.getStatus() == StepStatus.WAITING_USER_CLARIFICATION)
                 .count();
 
+        OutputEvaluationStatus evalStatus = outputEvaluation == null ? null : outputEvaluation.status();
+        String evalLabel = evalStatus == null ? null : evaluationStatusLabel(objective, evalStatus);
+        String evalMessage = outputEvaluation == null ? null : outputEvaluation.message();
+        List<String> evalIssues = outputEvaluation == null ? null : outputEvaluation.issues();
+
         return new WorkflowSummary(
                 status,
-                statusLabel(objective, status),
+                statusLabel(objective, status, evalStatus),
                 totalSteps,
                 completedSteps,
                 skippedSteps,
                 failedSteps,
                 status == WorkflowExecutionStatus.NEEDS_HUMAN_INTERVENTION,
                 currentStep,
-                userMessage
+                evalStatus,
+                evalLabel,
+                evalMessage,
+                evalIssues
         );
     }
 
@@ -2489,6 +2604,10 @@ public class WorkflowService {
         if (summary != null) {
             markdown.append(chinese ? "- 目标：" : "- Objective: ").append(objective).append("\n");
             markdown.append(chinese ? "- 状态：" : "- Status: ").append(summary.statusLabel()).append("\n");
+            // 添加评估状态（如果有）
+            if (summary.evaluationStatus() != null && summary.evaluationLabel() != null) {
+                markdown.append(chinese ? "- 评估：" : "- Evaluation: ").append(summary.evaluationLabel()).append("\n");
+            }
             markdown.append(chinese ? "- 总步骤数：" : "- Total steps: ").append(summary.totalSteps()).append("\n");
             markdown.append(chinese ? "- 已完成：" : "- Completed: ").append(summary.completedSteps()).append("\n");
             markdown.append(chinese ? "- 已跳过：" : "- Skipped: ").append(summary.skippedSteps()).append("\n");
@@ -2589,12 +2708,47 @@ public class WorkflowService {
                 .collect(Collectors.joining("\n"));
     }
 
+    /**
+     * 状态标签（带评估状态），评估状态优先于执行状态
+     */
+    private String statusLabel(String objective, WorkflowExecutionStatus status, OutputEvaluationStatus evalStatus) {
+        // 评估状态优先
+        if (evalStatus == OutputEvaluationStatus.BLOCKER) {
+            return ResponseLanguageHelper.choose(objective, "结果不可用", "Output unusable");
+        }
+        if (evalStatus == OutputEvaluationStatus.MAJOR_ISSUES) {
+            return ResponseLanguageHelper.choose(objective, "已完成，需改进", "Completed with issues");
+        }
+        if (evalStatus == OutputEvaluationStatus.MINOR_ISSUES) {
+            return ResponseLanguageHelper.choose(objective, "基本完成", "Completed with minor issues");
+        }
+        // 默认执行状态
+        return statusLabel(objective, status);
+    }
+
     private String statusLabel(String objective, WorkflowExecutionStatus status) {
         return switch (status) {
-            case COMPLETED -> ResponseLanguageHelper.choose(objective, "\u5b8c\u5168\u6267\u884c\u6210\u529f", "Completed");
-            case NEEDS_HUMAN_INTERVENTION -> ResponseLanguageHelper.choose(objective, "\u9700\u8981\u4eba\u4e3a\u5e72\u9884", "Needs human intervention");
-            case ABORTED -> ResponseLanguageHelper.choose(objective, "\u5df2\u7ec8\u6b62", "Aborted");
-            case FAILED -> ResponseLanguageHelper.choose(objective, "\u51fa\u73b0\u9519\u8bef", "Failed");
+            case COMPLETED -> ResponseLanguageHelper.choose(objective, "完全执行成功", "Completed");
+            case NEEDS_HUMAN_INTERVENTION -> ResponseLanguageHelper.choose(objective, "需要人为干预", "Needs human intervention");
+            case ABORTED -> ResponseLanguageHelper.choose(objective, "已终止", "Aborted");
+            case FAILED -> ResponseLanguageHelper.choose(objective, "出现错误", "Failed");
+        };
+    }
+
+    /**
+     * 评估状态标签
+     */
+    private String evaluationStatusLabel(String objective, OutputEvaluationStatus status) {
+        if (status == null) {
+            return null;
+        }
+        return switch (status) {
+            case PASSED -> ResponseLanguageHelper.choose(objective, "通过", "Passed");
+            case MINOR_ISSUES -> ResponseLanguageHelper.choose(objective, "可用，仍可小幅优化", "Usable with minor improvements");
+            case MAJOR_ISSUES -> ResponseLanguageHelper.choose(objective, "可用，但仍需进一步补充", "Usable but needs major improvements");
+            case BLOCKER -> ResponseLanguageHelper.choose(objective, "缺少核心结果", "Core deliverable missing");
+            case ASK_USER -> ResponseLanguageHelper.choose(objective, "需要用户确认偏好", "Needs user confirmation");
+            case SKIPPED -> ResponseLanguageHelper.choose(objective, "已跳过", "Skipped");
         };
     }
 
