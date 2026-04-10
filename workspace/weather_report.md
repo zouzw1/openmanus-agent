@@ -1,0 +1,1 @@
+{"success":true,"city":"厦门","location":{"lat":24.4798,"lon":118.0894},"temperature":27,"condition":"多云","humidity":71,"windSpeed":15,"isDay":true,"weatherCode":1}

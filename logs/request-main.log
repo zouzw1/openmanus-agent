@@ -1,0 +1,310 @@
+2026-04-10 17:34:26.762 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.2.Final
+2026-04-10 17:34:26.807 [main] INFO  c.o.d.s.StudyPlanDemoApplication - Starting StudyPlanDemoApplication using Java 17.0.12 with PID 14836 (D:\projects\untitled\openmanus-spring-ai-alibaba\study-plan-demo\target\classes started by zzw in D:\projects\untitled\openmanus-spring-ai-alibaba)
+2026-04-10 17:34:26.807 [main] INFO  c.o.d.s.StudyPlanDemoApplication - No active profile set, falling back to 1 default profile: "default"
+2026-04-10 17:34:28.114 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8091 (http)
+2026-04-10 17:34:28.124 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8091"]
+2026-04-10 17:34:28.128 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-10 17:34:28.128 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.36]
+2026-04-10 17:34:28.155 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.2.Final
+2026-04-10 17:34:28.172 [main] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-10 17:34:28.173 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1336 ms
+2026-04-10 17:34:28.191 [main] INFO  c.o.s.OpenManusSpringAiAlibabaApplication - Starting OpenManusSpringAiAlibabaApplication using Java 17.0.12 with PID 24188 (D:\projects\untitled\openmanus-spring-ai-alibaba\openmanus-spring-ai-alibaba\target\classes started by zzw in D:\projects\untitled\openmanus-spring-ai-alibaba)
+2026-04-10 17:34:28.191 [main] DEBUG c.o.s.OpenManusSpringAiAlibabaApplication - Running with Spring Boot v3.4.3, Spring v6.2.3
+2026-04-10 17:34:28.192 [main] INFO  c.o.s.OpenManusSpringAiAlibabaApplication - No active profile set, falling back to 1 default profile: "default"
+2026-04-10 17:34:28.741 [main] INFO  c.o.saa.service.mcp.McpService - Initializing 1 MCP servers
+2026-04-10 17:34:28.741 [main] INFO  c.o.saa.service.mcp.McpService - Connecting to MCP server 'demo-sse' (type: sse, url: http://127.0.0.1:18080/mcp)
+2026-04-10 17:34:28.743 [main] INFO  c.o.saa.service.mcp.SseMcpConnection - Creating MCP SSE connection to server 'demo-sse' at http://127.0.0.1:18080/mcp/sse
+2026-04-10 17:34:28.818 [main] INFO  c.o.saa.service.mcp.McpService - Successfully connected to MCP server 'demo-sse'
+2026-04-10 17:34:28.825 [main] INFO  c.o.saa.prompt.SystemPromptBuilder - SystemPromptBuilder initialized with 7 static sections and 0 dynamic sections
+2026-04-10 17:34:28.833 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Discovered 0 skills from ./skills/user
+2026-04-10 17:34:28.833 [main] INFO  c.a.c.a.g.s.r.f.FileSystemSkillRegistry - Loaded 0 user-level skills from ./skills/user
+2026-04-10 17:34:28.838 [main] WARN  c.a.c.a.g.s.r.f.SkillScanner - Skill 'docx-format' in .\skills\project\docx-format-skill-main\SKILL.md does not follow Agent Skills spec: name 'docx-format' must match directory name 'docx-format-skill-main'. Consider renaming to be spec-compliant.
+2026-04-10 17:34:28.839 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: docx-format from .\skills\project\docx-format-skill-main
+2026-04-10 17:34:28.841 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: markdown-converter from .\skills\project\markdown-converter
+2026-04-10 17:34:28.843 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: pdf from .\skills\project\pdf
+2026-04-10 17:34:28.845 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: pptx from .\skills\project\pptx
+2026-04-10 17:34:28.846 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: project-planning from .\skills\project\project-planning
+2026-04-10 17:34:28.847 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: skill-creator from .\skills\project\skill-creator
+2026-04-10 17:34:28.850 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: tavily-search-pro from .\skills\project\tavily-search-pro
+2026-04-10 17:34:28.851 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Discovered 7 skills from ./skills/project
+2026-04-10 17:34:28.851 [main] INFO  c.a.c.a.g.s.r.f.FileSystemSkillRegistry - Loaded 7 project-level skills from ./skills/project
+2026-04-10 17:34:28.851 [main] INFO  c.a.c.a.g.s.r.f.FileSystemSkillRegistry - Skills reloaded: 7 total skills
+2026-04-10 17:34:29.018 [main] WARN  o.m.s.mapper.ClassPathMapperScanner - No MyBatis mapper was found in '[com.openmanus.saa]' package. Please check your configuration.
+2026-04-10 17:34:29.105 [main] INFO  c.o.s.s.session.SessionMemoryService - SessionMemoryService initialized with storage: MEMORY, compaction: true, ttl: PT30M
+2026-04-10 17:34:29.111 [main] INFO  c.o.s.s.WorkflowCheckpointService - WorkflowCheckpointService initialized with MemorySaver
+2026-04-10 17:34:29.136 [main] INFO  c.o.s.s.WorkflowGraphOrchestrator - UnifiedWorkflowGraph compiled successfully
+2026-04-10 17:34:29.330 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-10 17:34:29.337 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-10 17:34:29.338 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-10 17:34:29.338 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.36]
+2026-04-10 17:34:29.399 [main] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-10 17:34:29.399 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1177 ms
+2026-04-10 17:34:29.488 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 1 endpoint beneath base path '/actuator'
+2026-04-10 17:34:29.504 [main] INFO  c.o.s.a.BundledClasspathAgentConfigSource - Loaded 3 bundled agent definitions from classpath
+2026-04-10 17:34:29.507 [main] INFO  c.o.s.a.LocalFileAgentConfigSource - Loaded 2 local agent definitions from D:\projects\untitled\openmanus-spring-ai-alibaba\agents
+2026-04-10 17:34:29.507 [main] INFO  c.o.saa.agent.AgentRegistryService - Overriding previously loaded agent definition for id 'data_analysis' with a later source entry.
+2026-04-10 17:34:29.507 [main] INFO  c.o.saa.agent.AgentRegistryService - Overriding previously loaded agent definition for id 'manus' with a later source entry.
+2026-04-10 17:34:29.512 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: browserAction with 5 parameters
+2026-04-10 17:34:29.512 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: glob with 1 parameters
+2026-04-10 17:34:29.512 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: globDirs with 1 parameters
+2026-04-10 17:34:29.512 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: grep with 3 parameters
+2026-04-10 17:34:29.512 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: grepCount with 2 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: callMcpTool with 3 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: htmlToPdf with 2 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: markdownFileToPdf with 2 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: markdownToPdf with 2 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: getPlan with 1 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: createPlan with 2 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: rag_ingest with 4 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: rag_search with 3 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: runSandboxCommand with 1 parameters
+2026-04-10 17:34:29.513 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: runPowerShell with 1 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: calculateDistance with 3 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: checkHoliday with 2 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: isHoliday with 2 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: convertCurrency with 3 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: estimateBudget with 4 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: getTimezone with 1 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: planRoute with 3 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: queryForecast with 2 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: queryWeather with 1 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: searchAttractions with 3 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: searchHotels with 3 parameters
+2026-04-10 17:34:29.514 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: searchRestaurants with 3 parameters
+2026-04-10 17:34:29.515 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: listWorkspaceFiles with 1 parameters
+2026-04-10 17:34:29.515 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: readWorkspaceFile with 1 parameters
+2026-04-10 17:34:29.515 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: writeWorkspaceFile with 2 parameters
+2026-04-10 17:34:29.515 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: recommendLearningGoals with 2 parameters
+2026-04-10 17:34:29.515 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: buildWeeklyStudySchedule with 4 parameters
+2026-04-10 17:34:29.515 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: generatePracticeChecklist with 3 parameters
+2026-04-10 17:34:29.516 [main] INFO  c.o.saa.service.ToolRegistryService - Discovered 33 local tool definitions
+2026-04-10 17:34:29.609 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8091"]
+2026-04-10 17:34:29.618 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8091 (http) with context path '/'
+2026-04-10 17:34:29.631 [main] INFO  c.o.d.s.StudyPlanDemoApplication - Started StudyPlanDemoApplication in 3.231 seconds (process running for 3.624)
+2026-04-10 17:34:29.788 [RMI TCP Connection(1)-10.139.160.170] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-10 17:34:29.788 [RMI TCP Connection(1)-10.139.160.170] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-10 17:34:29.790 [RMI TCP Connection(1)-10.139.160.170] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 2 ms
+2026-04-10 17:34:29.873 [main] INFO  c.o.saa.service.mcp.McpService - Initializing 1 MCP servers
+2026-04-10 17:34:29.873 [main] INFO  c.o.saa.service.mcp.McpService - Connecting to MCP server 'demo-sse' (type: sse, url: http://127.0.0.1:18080/mcp)
+2026-04-10 17:34:29.875 [main] INFO  c.o.saa.service.mcp.SseMcpConnection - Creating MCP SSE connection to server 'demo-sse' at http://127.0.0.1:18080/mcp/sse
+2026-04-10 17:34:29.929 [main] INFO  c.o.saa.service.mcp.McpService - Successfully connected to MCP server 'demo-sse'
+2026-04-10 17:34:29.935 [main] INFO  c.o.saa.prompt.SystemPromptBuilder - SystemPromptBuilder initialized with 7 static sections and 0 dynamic sections
+2026-04-10 17:34:29.950 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Discovered 0 skills from ./skills/user
+2026-04-10 17:34:29.950 [main] INFO  c.a.c.a.g.s.r.f.FileSystemSkillRegistry - Loaded 0 user-level skills from ./skills/user
+2026-04-10 17:34:29.953 [main] WARN  c.a.c.a.g.s.r.f.SkillScanner - Skill 'docx-format' in .\skills\project\docx-format-skill-main\SKILL.md does not follow Agent Skills spec: name 'docx-format' must match directory name 'docx-format-skill-main'. Consider renaming to be spec-compliant.
+2026-04-10 17:34:29.953 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: docx-format from .\skills\project\docx-format-skill-main
+2026-04-10 17:34:29.955 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: markdown-converter from .\skills\project\markdown-converter
+2026-04-10 17:34:29.956 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: pdf from .\skills\project\pdf
+2026-04-10 17:34:29.957 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: pptx from .\skills\project\pptx
+2026-04-10 17:34:29.957 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: project-planning from .\skills\project\project-planning
+2026-04-10 17:34:29.958 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: skill-creator from .\skills\project\skill-creator
+2026-04-10 17:34:29.961 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Loaded skill: tavily-search-pro from .\skills\project\tavily-search-pro
+2026-04-10 17:34:29.961 [main] INFO  c.a.c.a.g.s.r.f.SkillScanner - Discovered 7 skills from ./skills/project
+2026-04-10 17:34:29.961 [main] INFO  c.a.c.a.g.s.r.f.FileSystemSkillRegistry - Loaded 7 project-level skills from ./skills/project
+2026-04-10 17:34:29.961 [main] INFO  c.a.c.a.g.s.r.f.FileSystemSkillRegistry - Skills reloaded: 7 total skills
+2026-04-10 17:34:30.225 [main] INFO  c.o.s.s.session.SessionMemoryService - SessionMemoryService initialized with storage: MEMORY, compaction: true, ttl: PT30M
+2026-04-10 17:34:30.230 [main] INFO  c.o.s.s.WorkflowCheckpointService - WorkflowCheckpointService initialized with MemorySaver
+2026-04-10 17:34:30.250 [main] INFO  c.o.s.s.WorkflowGraphOrchestrator - UnifiedWorkflowGraph compiled successfully
+2026-04-10 17:34:37.208 [main] INFO  o.s.b.a.e.web.EndpointLinksResolver - Exposing 2 endpoints beneath base path '/actuator'
+2026-04-10 17:34:37.228 [main] INFO  c.o.s.a.BundledClasspathAgentConfigSource - Loaded 3 bundled agent definitions from classpath
+2026-04-10 17:34:37.231 [main] INFO  c.o.s.a.LocalFileAgentConfigSource - Loaded 2 local agent definitions from D:\projects\untitled\openmanus-spring-ai-alibaba\agents
+2026-04-10 17:34:37.231 [main] INFO  c.o.saa.agent.AgentRegistryService - Overriding previously loaded agent definition for id 'data_analysis' with a later source entry.
+2026-04-10 17:34:37.232 [main] INFO  c.o.saa.agent.AgentRegistryService - Overriding previously loaded agent definition for id 'manus' with a later source entry.
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: browserAction with 5 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: glob with 1 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: globDirs with 1 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: grep with 3 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: grepCount with 2 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: callMcpTool with 3 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: htmlToPdf with 2 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: markdownFileToPdf with 2 parameters
+2026-04-10 17:34:37.236 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: markdownToPdf with 2 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: createPlan with 2 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: getPlan with 1 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: rag_ingest with 4 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: rag_search with 3 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: runSandboxCommand with 1 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: runPowerShell with 1 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: calculateDistance with 3 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: isHoliday with 2 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: checkHoliday with 2 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: convertCurrency with 3 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: estimateBudget with 4 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: getTimezone with 1 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: planRoute with 3 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: queryForecast with 2 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: queryWeather with 1 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: searchAttractions with 3 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: searchHotels with 3 parameters
+2026-04-10 17:34:37.237 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: searchRestaurants with 3 parameters
+2026-04-10 17:34:37.238 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: writeWorkspaceFile with 2 parameters
+2026-04-10 17:34:37.238 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: readWorkspaceFile with 1 parameters
+2026-04-10 17:34:37.238 [main] INFO  c.o.saa.service.ToolRegistryService - Registered tool metadata: listWorkspaceFiles with 1 parameters
+2026-04-10 17:34:37.238 [main] INFO  c.o.saa.service.ToolRegistryService - Discovered 30 local tool definitions
+2026-04-10 17:34:37.336 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-10 17:34:37.344 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-04-10 17:34:37.355 [main] INFO  c.o.s.OpenManusSpringAiAlibabaApplication - Started OpenManusSpringAiAlibabaApplication in 9.547 seconds (process running for 9.949)
+2026-04-10 17:34:37.857 [RMI TCP Connection(4)-10.139.160.170] INFO  o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-10 17:34:37.857 [RMI TCP Connection(4)-10.139.160.170] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-10 17:34:37.859 [RMI TCP Connection(4)-10.139.160.170] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-04-10 17:34:37.864 [RMI TCP Connection(2)-10.139.160.170] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-10 17:34:38.976 [RMI TCP Connection(2)-10.139.160.170] WARN  o.s.b.a.j.DataSourceHealthIndicator - DataSource health check failed
+org.springframework.jdbc.CannotGetJdbcConnectionException: Failed to obtain JDBC Connection
+	at org.springframework.jdbc.datasource.DataSourceUtils.getConnection(DataSourceUtils.java:84)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:342)
+	at org.springframework.boot.actuate.jdbc.DataSourceHealthIndicator.getProduct(DataSourceHealthIndicator.java:122)
+	at org.springframework.boot.actuate.jdbc.DataSourceHealthIndicator.doDataSourceHealthCheck(DataSourceHealthIndicator.java:105)
+	at org.springframework.boot.actuate.jdbc.DataSourceHealthIndicator.doHealthCheck(DataSourceHealthIndicator.java:100)
+	at org.springframework.boot.actuate.health.AbstractHealthIndicator.health(AbstractHealthIndicator.java:82)
+	at org.springframework.boot.actuate.health.HealthIndicator.getHealth(HealthIndicator.java:37)
+	at org.springframework.boot.actuate.health.HealthEndpoint.getHealth(HealthEndpoint.java:82)
+	at org.springframework.boot.actuate.health.HealthEndpoint.getHealth(HealthEndpoint.java:41)
+	at org.springframework.boot.actuate.health.HealthEndpointSupport.getLoggedHealth(HealthEndpointSupport.java:172)
+	at org.springframework.boot.actuate.health.HealthEndpointSupport.getContribution(HealthEndpointSupport.java:145)
+	at org.springframework.boot.actuate.health.HealthEndpointSupport.getAggregateContribution(HealthEndpointSupport.java:156)
+	at org.springframework.boot.actuate.health.HealthEndpointSupport.getContribution(HealthEndpointSupport.java:141)
+	at org.springframework.boot.actuate.health.HealthEndpointSupport.getHealth(HealthEndpointSupport.java:110)
+	at org.springframework.boot.actuate.health.HealthEndpointSupport.getHealth(HealthEndpointSupport.java:81)
+	at org.springframework.boot.actuate.health.HealthEndpoint.health(HealthEndpoint.java:76)
+	at org.springframework.boot.actuate.health.HealthEndpoint.health(HealthEndpoint.java:66)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.springframework.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:281)
+	at org.springframework.boot.actuate.endpoint.invoke.reflect.ReflectiveOperationInvoker.invoke(ReflectiveOperationInvoker.java:74)
+	at org.springframework.boot.actuate.endpoint.annotation.AbstractDiscoveredOperation.invoke(AbstractDiscoveredOperation.java:60)
+	at org.springframework.boot.actuate.endpoint.jmx.EndpointMBean.invoke(EndpointMBean.java:124)
+	at org.springframework.boot.actuate.endpoint.jmx.EndpointMBean.invoke(EndpointMBean.java:97)
+	at java.management/com.sun.jmx.interceptor.DefaultMBeanServerInterceptor.invoke(DefaultMBeanServerInterceptor.java:814)
+	at java.management/com.sun.jmx.mbeanserver.JmxMBeanServer.invoke(JmxMBeanServer.java:802)
+	at java.management.rmi/javax.management.remote.rmi.RMIConnectionImpl.doOperation(RMIConnectionImpl.java:1472)
+	at java.management.rmi/javax.management.remote.rmi.RMIConnectionImpl$PrivilegedOperation.run(RMIConnectionImpl.java:1310)
+	at java.management.rmi/javax.management.remote.rmi.RMIConnectionImpl.doPrivilegedOperation(RMIConnectionImpl.java:1405)
+	at java.management.rmi/javax.management.remote.rmi.RMIConnectionImpl.invoke(RMIConnectionImpl.java:829)
+	at java.base/jdk.internal.reflect.GeneratedMethodAccessor19.invoke(Unknown Source)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.rmi/sun.rmi.server.UnicastServerRef.dispatch(UnicastServerRef.java:360)
+	at java.rmi/sun.rmi.transport.Transport$1.run(Transport.java:200)
+	at java.rmi/sun.rmi.transport.Transport$1.run(Transport.java:197)
+	at java.base/java.security.AccessController.doPrivileged(AccessController.java:712)
+	at java.rmi/sun.rmi.transport.Transport.serviceCall(Transport.java:196)
+	at java.rmi/sun.rmi.transport.tcp.TCPTransport.handleMessages(TCPTransport.java:587)
+	at java.rmi/sun.rmi.transport.tcp.TCPTransport$ConnectionHandler.run0(TCPTransport.java:828)
+	at java.rmi/sun.rmi.transport.tcp.TCPTransport$ConnectionHandler.lambda$run$0(TCPTransport.java:705)
+	at java.base/java.security.AccessController.doPrivileged(AccessController.java:399)
+	at java.rmi/sun.rmi.transport.tcp.TCPTransport$ConnectionHandler.run(TCPTransport.java:704)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:842)
+Caused by: com.mysql.cj.jdbc.exceptions.CommunicationsException: Communications link failure
+
+The last packet sent successfully to the server was 0 milliseconds ago. The driver has not received any packets from the server.
+	at com.mysql.cj.jdbc.exceptions.SQLError.createCommunicationsException(SQLError.java:165)
+	at com.mysql.cj.jdbc.exceptions.SQLExceptionsMapping.translateException(SQLExceptionsMapping.java:55)
+	at com.mysql.cj.jdbc.ConnectionImpl.createNewIO(ConnectionImpl.java:837)
+	at com.mysql.cj.jdbc.ConnectionImpl.<init>(ConnectionImpl.java:420)
+	at com.mysql.cj.jdbc.ConnectionImpl.getInstance(ConnectionImpl.java:238)
+	at com.mysql.cj.jdbc.NonRegisteringDriver.connect(NonRegisteringDriver.java:180)
+	at com.zaxxer.hikari.util.DriverDataSource.getConnection(DriverDataSource.java:137)
+	at com.zaxxer.hikari.pool.PoolBase.newConnection(PoolBase.java:360)
+	at com.zaxxer.hikari.pool.PoolBase.newPoolEntry(PoolBase.java:202)
+	at com.zaxxer.hikari.pool.HikariPool.createPoolEntry(HikariPool.java:461)
+	at com.zaxxer.hikari.pool.HikariPool.checkFailFast(HikariPool.java:550)
+	at com.zaxxer.hikari.pool.HikariPool.<init>(HikariPool.java:98)
+	at com.zaxxer.hikari.HikariDataSource.getConnection(HikariDataSource.java:111)
+	at org.springframework.jdbc.datasource.DataSourceUtils.fetchConnection(DataSourceUtils.java:160)
+	at org.springframework.jdbc.datasource.DataSourceUtils.doGetConnection(DataSourceUtils.java:118)
+	at org.springframework.jdbc.datasource.DataSourceUtils.getConnection(DataSourceUtils.java:81)
+	... 47 common frames omitted
+Caused by: com.mysql.cj.exceptions.CJCommunicationsException: Communications link failure
+
+The last packet sent successfully to the server was 0 milliseconds ago. The driver has not received any packets from the server.
+	at java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance0(Native Method)
+	at java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:45)
+	at java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:499)
+	at java.base/java.lang.reflect.Constructor.newInstance(Constructor.java:480)
+	at com.mysql.cj.exceptions.ExceptionFactory.createException(ExceptionFactory.java:52)
+	at com.mysql.cj.exceptions.ExceptionFactory.createException(ExceptionFactory.java:95)
+	at com.mysql.cj.exceptions.ExceptionFactory.createException(ExceptionFactory.java:140)
+	at com.mysql.cj.exceptions.ExceptionFactory.createCommunicationsException(ExceptionFactory.java:156)
+	at com.mysql.cj.protocol.a.NativeSocketConnection.connect(NativeSocketConnection.java:79)
+	at com.mysql.cj.NativeSession.connect(NativeSession.java:142)
+	at com.mysql.cj.jdbc.ConnectionImpl.connectOneTryOnly(ConnectionImpl.java:961)
+	at com.mysql.cj.jdbc.ConnectionImpl.createNewIO(ConnectionImpl.java:825)
+	... 60 common frames omitted
+Caused by: java.net.ConnectException: Connection refused: no further information
+	at java.base/sun.nio.ch.Net.pollConnect(Native Method)
+	at java.base/sun.nio.ch.Net.pollConnectNow(Net.java:672)
+	at java.base/sun.nio.ch.NioSocketImpl.timedFinishConnect(NioSocketImpl.java:547)
+	at java.base/sun.nio.ch.NioSocketImpl.connect(NioSocketImpl.java:602)
+	at java.base/java.net.SocksSocketImpl.connect(SocksSocketImpl.java:327)
+	at java.base/java.net.Socket.connect(Socket.java:633)
+	at com.mysql.cj.protocol.StandardSocketFactory.connect(StandardSocketFactory.java:144)
+	at com.mysql.cj.protocol.a.NativeSocketConnection.connect(NativeSocketConnection.java:53)
+	... 63 common frames omitted
+2026-04-10 17:34:44.963 [HttpClient-2-Worker-2] INFO  i.m.client.LifecycleInitializer - Server response with Protocol: 2024-11-05, Capabilities: ServerCapabilities[completions=null, experimental=null, logging=LoggingCapabilities[], prompts=null, resources=null, tools=ToolCapabilities[listChanged=true]], Info: Implementation[name=mcp-test-service, title=null, version=0.1.0] and Instructions null
+2026-04-10 17:44:09.421 [http-nio-8080-exec-3] ERROR o.a.c.c.C.[.[.[.[dispatcherServlet] - Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed: java.lang.IllegalStateException: No pending feedback found] with root cause
+java.lang.IllegalStateException: No pending feedback found
+	at com.openmanus.saa.controller.AgentController.lambda$chat$0(AgentController.java:77)
+	at java.base/java.util.Optional.orElseThrow(Optional.java:403)
+	at com.openmanus.saa.controller.AgentController.chat(AgentController.java:77)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:257)
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:190)
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:986)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:891)
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1088)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:978)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doPost(FrameworkServlet.java:914)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:590)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:195)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at com.openmanus.saa.config.RequestIdFilter.doFilter(RequestIdFilter.java:38)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.ServerHttpObservationFilter.doFilterInternal(ServerHttpObservationFilter.java:114)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:483)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:397)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:905)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1743)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1190)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:842)

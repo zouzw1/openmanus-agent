@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property name="LOG_HOME" value="logs"/>
+    <property name="CONSOLE_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{requestId:-main}] %-5level %logger{36} - %msg%n"/>
+    <property name="FILE_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <!-- 控制台 appender -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 主日志文件 appender -->
+    <appender name="MAIN_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/openmanus.log</file>
+        <encoder>
+            <pattern>${FILE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/openmanus.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- 每个请求单独日志文件 (使用 SiftingAppender) -->
+    <appender name="REQUEST_SIFTING" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <key>requestId</key>
+            <defaultValue>main</defaultValue>
+        </discriminator>
+        <sift>
+            <appender name="REQUEST-${requestId}" class="ch.qos.logback.core.FileAppender">
+                <file>${LOG_HOME}/request-${requestId}.log</file>
+                <encoder>
+                    <pattern>${FILE_PATTERN}</pattern>
+                    <charset>UTF-8</charset>
+                </encoder>
+                <!-- 使用严格模式，确保每个请求的日志都写入文件 -->
+                <prudent>true</prudent>
+            </appender>
+        </sift>
+    </appender>
+
+    <!-- 开发环境配置 -->
+    <springProfile name="dev">
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+        <logger name="com.openmanus.saa" level="DEBUG"/>
+    </springProfile>
+
+    <!-- 生产环境配置 -->
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="MAIN_FILE"/>
+            <appender-ref ref="REQUEST_SIFTING"/>
+        </root>
+        <logger name="com.openmanus.saa" level="INFO"/>
+    </springProfile>
+
+    <!-- 默认配置 (非 dev/prod) -->
+    <springProfile name="!dev,!prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="REQUEST_SIFTING"/>
+        </root>
+        <logger name="com.openmanus.saa" level="DEBUG"/>
+    </springProfile>
+</configuration>
