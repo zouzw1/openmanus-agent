@@ -212,7 +212,9 @@ final class WorkflowLifecycleNodeHandler {
                     executionResult.recoveryExhausted ? " (recovery exhausted)" : "");
 
             // 返回特殊结果，框架会在 executeStep 后中断
-            return buildStepResult(updatedSteps, actualStepIndex, executedCount, false);
+            Map<String, Object> result = buildStepResult(updatedSteps, actualStepIndex, executedCount, false);
+            result.put(WorkflowCheckpointService.FEEDBACK_WAIT_KEY, true);
+            return result;
         }
 
         // 执行失败
