@@ -2,6 +2,7 @@ package com.openmanus.saa.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,13 +13,17 @@ import com.openmanus.saa.agent.AgentDefinition;
 import com.openmanus.saa.agent.CapabilityAccessMode;
 import com.openmanus.saa.agent.IdAccessPolicy;
 import com.openmanus.saa.config.OpenManusProperties;
+import com.openmanus.saa.config.SessionConfig;
 import com.openmanus.saa.model.OutputEvaluationStatus;
 import com.openmanus.saa.model.ResponseMode;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.service.agent.SpecialistAgent;
 import com.openmanus.saa.service.intent.IntentResolutionService;
+import com.openmanus.saa.service.session.SessionCompactor;
+import com.openmanus.saa.service.session.SessionManager;
 import com.openmanus.saa.service.session.SessionMemoryService;
+import com.openmanus.saa.service.session.storage.SessionStorage;
 import com.openmanus.saa.service.summary.WorkflowSummaryFormatter;
 import java.util.List;
 import java.util.Map;
@@ -94,7 +99,17 @@ class WorkflowServiceRegressionTest {
     @Test
     void retryOutputWorkflowNodeExecutesFromClampedRetryIndex() {
         WorkflowService service = mock(WorkflowService.class);
-        SessionMemoryService sessionMemoryService = new SessionMemoryService();
+
+        // Mock SessionStorage
+        SessionStorage sessionStorage = mock(SessionStorage.class);
+        when(sessionStorage.findById(any())).thenReturn(Optional.empty());
+        when(sessionStorage.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SessionMemoryService sessionMemoryService = new SessionMemoryService(
+            sessionStorage,
+            mock(SessionCompactor.class),
+            new SessionConfig()
+        );
         WorkflowLifecycleNodeHandler handler = new WorkflowLifecycleNodeHandler(service);
         List<WorkflowStep> currentSteps = List.of(
                 new WorkflowStep("manus", "step 1"),
@@ -142,22 +157,77 @@ class WorkflowServiceRegressionTest {
         assertThat(result).containsEntry("outputEvaluationRetryCount", 1);
     }
 
+    @Test
+    void executionResultRecoveryExhaustedIsTrueOnFinalFailure() {
+        WorkflowService.ExecutionResult result = new WorkflowService.ExecutionResult(
+                false, null,
+                List.of("searchTool"), List.of(),
+                List.of(), List.of(),
+                false, "Service unavailable",
+                2, true
+        );
+
+        assertThat(result.recoveryExhausted).isTrue();
+        assertThat(result.needsHumanFeedback).isFalse();
+        assertThat(result.success).isFalse();
+    }
+
+    @Test
+    void executionResultRecoveryExhaustedIsFalseOnSuccess() {
+        WorkflowService.ExecutionResult result = new WorkflowService.ExecutionResult(
+                true, "Step completed",
+                List.of(), List.of(),
+                List.of(), List.of(),
+                false, null,
+                1, false
+        );
+
+        assertThat(result.recoveryExhausted).isFalse();
+        assertThat(result.success).isTrue();
+    }
+
+    @Test
+    void executionResultRecoveryExhaustedIsFalseWhenNeedsHumanFeedback() {
+        WorkflowService.ExecutionResult result = new WorkflowService.ExecutionResult(
+                false, null,
+                List.of(), List.of(),
+                List.of(), List.of(),
+                true, "Missing user input",
+                1, false
+        );
+
+        assertThat(result.needsHumanFeedback).isTrue();
+        assertThat(result.recoveryExhausted).isFalse();
+    }
+
     private WorkflowService newWorkflowService(SkillCapabilityService skillCapabilityService) {
         OpenManusProperties properties = new OpenManusProperties();
         properties.setWorkspace("./workspace");
+
+        // Mock SessionStorage
+        SessionStorage sessionStorage = mock(SessionStorage.class);
+        lenient().when(sessionStorage.findById(any())).thenReturn(Optional.empty());
+        lenient().when(sessionStorage.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
         return new WorkflowService(
                 mock(ChatClient.class),
                 mock(PlanningService.class),
                 mock(com.openmanus.saa.tool.PlanningTools.class),
                 properties,
                 List.<SpecialistAgent>of(),
-                new SessionMemoryService(),
+                new SessionMemoryService(
+                    sessionStorage,
+                    mock(SessionCompactor.class),
+                    new SessionConfig()
+                ),
+                mock(SessionManager.class),
                 mock(com.openmanus.saa.agent.AgentRegistryService.class),
                 mock(SkillsService.class),
                 skillCapabilityService,
                 mock(AgentCapabilitySnapshotService.class),
                 mock(IntentResolutionService.class),
-                List.<WorkflowSummaryFormatter>of()
+                List.<WorkflowSummaryFormatter>of(),
+                mock(com.openmanus.saa.service.supervisor.SupervisorAgentService.class)
         );
     }
 }

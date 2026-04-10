@@ -22,7 +22,6 @@ import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowExecutionStatus;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.model.WorkflowSummary;
-import com.openmanus.saa.model.context.WorkflowState;
 import com.openmanus.saa.model.session.Session;
 import com.openmanus.saa.service.agent.AgentExecutionResult;
 import com.openmanus.saa.service.agent.SpecialistAgent;
@@ -34,6 +33,7 @@ import com.openmanus.saa.service.summary.WorkflowSummaryFormatter;
 import com.openmanus.saa.service.supervisor.MultiAgentExecutionResponse;
 import com.openmanus.saa.service.supervisor.SupervisorAgentService;
 import com.openmanus.saa.tool.PlanningTools;
+import com.openmanus.saa.util.FinalAnswerDetector;
 import com.openmanus.saa.util.IntentResolutionHelper;
 import com.openmanus.saa.util.ParameterMissingDetector;
 import com.openmanus.saa.util.ResponseLanguageHelper;
@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -74,20 +75,6 @@ public class WorkflowService {
     private static final int STEP_RESULT_SUMMARY_LIMIT = 280;
     private static final int PARAMETER_CONTEXT_VALUE_LIMIT = 240;
     static final int DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES = 1;
-    private static final String GRAPH_RESPONSE_KEY = "workflowResponse";
-    private static final String GRAPH_PENDING_FEEDBACK_KEY = "pendingFeedback";
-    private static final String GRAPH_INTENT_RESOLUTION_KEY = "intentResolution";
-    private static final String GRAPH_PLAN_ID_KEY = "planId";
-    private static final String GRAPH_WORKFLOW_STEPS_KEY = "workflowSteps";
-    private static final String GRAPH_FAILED_STEP_KEY = "failedStep";
-    private static final String GRAPH_RESPONSE_MODE_KEY = "responseMode";
-    private static final String GRAPH_START_INDEX_KEY = "startIndex";
-    private static final String GRAPH_OUTPUT_EVALUATION_RESULT_KEY = "outputEvaluationResult";
-    private static final String GRAPH_OUTPUT_EVALUATION_DECISION_KEY = "outputEvaluationDecision";
-    private static final String GRAPH_OUTPUT_EVALUATION_RETRY_COUNT_KEY = "outputEvaluationRetryCount";
-    private static final String GRAPH_CURRENT_STEP_INDEX_KEY = "currentStepIndex";
-    private static final String GRAPH_EXECUTED_STEP_COUNT_KEY = "executedStepCount";
-    private static final String GRAPH_LOOP_CONTINUE_KEY = "loopContinue";
 
     /**
      * Intermediate artifact extensions that should not be reported to users.
@@ -113,9 +100,9 @@ public class WorkflowService {
     private final List<WorkflowSummaryFormatter> workflowSummaryFormatters;
     private final Path workspaceRoot;
     private final ObjectMapper objectMapper;
+    private final WorkflowCheckpointService checkpointService;
     private final WorkflowGraphOrchestrator graphOrchestrator;
     private final WorkflowLifecycleNodeHandler lifecycleNodeHandler;
-    private final WorkflowStepExecutionHandler stepExecutionHandler;
     private final SupervisorAgentService supervisorAgentService;
 
     public WorkflowService(
@@ -132,7 +119,8 @@ public class WorkflowService {
             AgentCapabilitySnapshotService agentCapabilitySnapshotService,
             IntentResolutionService intentResolutionService,
             List<WorkflowSummaryFormatter> workflowSummaryFormatters,
-            SupervisorAgentService supervisorAgentService
+            SupervisorAgentService supervisorAgentService,
+            WorkflowCheckpointService checkpointService
     ) {
         this.chatClient = chatClient;
         this.planningService = planningService;
@@ -152,9 +140,9 @@ public class WorkflowService {
         this.workflowSummaryFormatters = List.copyOf(orderedFormatters);
         this.workspaceRoot = Paths.get(properties.getWorkspace()).toAbsolutePath().normalize();
         this.objectMapper = new ObjectMapper();
-        this.graphOrchestrator = new WorkflowGraphOrchestrator(this);
+        this.checkpointService = checkpointService;
         this.lifecycleNodeHandler = new WorkflowLifecycleNodeHandler(this);
-        this.stepExecutionHandler = new WorkflowStepExecutionHandler(this);
+        this.graphOrchestrator = new WorkflowGraphOrchestrator(this, checkpointService);
         this.supervisorAgentService = supervisorAgentService;
         this.agentExecutors = new LinkedHashMap<>();
         for (SpecialistAgent agent : agentExecutors) {
@@ -168,19 +156,12 @@ public class WorkflowService {
 
     public WorkflowExecutionResponse execute(String sessionId, String objective, IntentResolution providedIntentResolution) {
         String resolvedSessionId = sessionMemoryService.getOrCreate(sessionId).sessionId();
-        String executionId = UUID.randomUUID().toString();
-        if (!sessionMemoryService.tryStartWorkflowExecution(resolvedSessionId, executionId)) {
-            String message = ResponseLanguageHelper.choose(
-                    objective,
-                    "当前会话已有工作流正在执行，请等待其完成后再重试，或更换新的 sessionId。",
-                    "A workflow is already running for this session. Wait for it to finish or use a new sessionId."
-            );
-            return createPlanningFailureResponse(objective, message, List.of());
-        }
+
         try {
-            return graphOrchestrator.invokeExecutionEntryGraph(resolvedSessionId, objective, providedIntentResolution);
-        } finally {
-            sessionMemoryService.finishWorkflowExecution(resolvedSessionId, executionId);
+            return graphOrchestrator.invoke(resolvedSessionId, objective, providedIntentResolution);
+        } catch (Exception ex) {
+            log.error("Workflow execution failed for session {}", resolvedSessionId, ex);
+            return createPlanningFailureResponse(objective, ex.getMessage(), List.of());
         }
     }
 
@@ -227,11 +208,11 @@ public class WorkflowService {
     }
 
     public Optional<HumanFeedbackRequest> getPendingFeedback(String sessionId) {
-        return sessionMemoryService.getPendingFeedback(sessionId);
+        return checkpointService.getPendingFeedback(sessionId);
     }
 
     public WorkflowExecutionResponse submitHumanFeedback(String sessionId, HumanFeedbackResponse feedback) {
-        return graphOrchestrator.invokeFeedbackEntryGraph(sessionId, feedback);
+        return graphOrchestrator.resume(sessionId, feedback);
     }
 
     public AgentResponse submitHumanFeedbackAsAgentResponse(String sessionId, HumanFeedbackResponse feedback) {
@@ -240,6 +221,10 @@ public class WorkflowService {
 
     SessionMemoryService sessionMemoryService() {
         return sessionMemoryService;
+    }
+
+    WorkflowCheckpointService checkpointService() {
+        return checkpointService;
     }
 
     PlanningService planningService() {
@@ -262,164 +247,62 @@ public class WorkflowService {
         return intentResolutionService;
     }
 
-    Map<String, Object> checkPendingFeedbackNode(OverAllState state) {
-        return lifecycleNodeHandler.checkPendingFeedbackNode(state);
+    // ========== 新的节点方法委托 ==========
+
+    Map<String, Object> planNode(OverAllState state) {
+        return lifecycleNodeHandler.planNode(state);
     }
 
-    Map<String, Object> returnPausedNode(OverAllState state) {
-        return lifecycleNodeHandler.returnPausedNode(state);
+    Map<String, Object> evaluatePlanNode(OverAllState state) {
+        return lifecycleNodeHandler.evaluatePlanNode(state);
     }
 
-    Map<String, Object> resolveAndExecuteNode(OverAllState state) {
-        return lifecycleNodeHandler.resolveAndExecuteNode(state);
+    Map<String, Object> executeStepNode(OverAllState state) {
+        return lifecycleNodeHandler.executeStepNode(state);
     }
 
-    Map<String, Object> loadPendingFeedbackNode(OverAllState state) {
-        return lifecycleNodeHandler.loadPendingFeedbackNode(state);
+    Map<String, Object> finalizeOutputNode(OverAllState state) {
+        return lifecycleNodeHandler.finalizeOutputNode(state);
+    }
+
+    Map<String, Object> evaluateOutputNode(OverAllState state) {
+        return lifecycleNodeHandler.evaluateOutputNode(state);
+    }
+
+    Map<String, Object> retryStepNode(OverAllState state) {
+        return lifecycleNodeHandler.retryStepNode(state);
+    }
+
+    Map<String, Object> resolveFeedbackNode(OverAllState state) {
+        return lifecycleNodeHandler.resolveFeedbackNode(state);
+    }
+
+    Map<String, Object> abortWorkflowNode(OverAllState state) {
+        return lifecycleNodeHandler.abortWorkflowNode(state);
+    }
+
+    Map<String, Object> returnResponseNode(OverAllState state) {
+        return lifecycleNodeHandler.returnResponseNode(state);
+    }
+
+    String selectPlanTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectPlanTransition(state);
+    }
+
+    String selectEvaluatePlanTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectEvaluatePlanTransition(state);
+    }
+
+    String selectExecuteStepTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectExecuteStepTransition(state);
+    }
+
+    String selectOutputEvaluationTransition(OverAllState state) {
+        return lifecycleNodeHandler.selectOutputEvaluationTransition(state);
     }
 
     String selectFeedbackTransition(OverAllState state) {
         return lifecycleNodeHandler.selectFeedbackTransition(state);
-    }
-
-    Map<String, Object> replanFromFeedbackNode(OverAllState state) {
-        return lifecycleNodeHandler.replanFromFeedbackNode(state);
-    }
-
-    Map<String, Object> abortFromFeedbackNode(OverAllState state) {
-        return lifecycleNodeHandler.abortFromFeedbackNode(state);
-    }
-
-    Map<String, Object> skipFromFeedbackNode(OverAllState state) {
-        return lifecycleNodeHandler.skipFromFeedbackNode(state);
-    }
-
-    Map<String, Object> continueFromFeedbackNode(OverAllState state) {
-        return lifecycleNodeHandler.continueFromFeedbackNode(state);
-    }
-
-    WorkflowExecutionResponse executeNewPlan(String sessionId, String objective, IntentResolution intentResolution) {
-        return graphOrchestrator.invokeNewPlanGraph(sessionId, objective, intentResolution);
-    }
-
-    Map<String, Object> createPlanContextNode(OverAllState state) {
-        return lifecycleNodeHandler.createPlanContextNode(state);
-    }
-
-    Map<String, Object> executePlannedStepsNode(OverAllState state) {
-        return lifecycleNodeHandler.executePlannedStepsNode(state);
-    }
-
-    WorkflowExecutionResponse continueExecution(
-            String sessionId,
-            String objective,
-            String planId,
-            List<WorkflowStep> workflowSteps,
-            int fromIndex
-    ) {
-        return graphOrchestrator.invokeContinueExecutionGraph(
-                sessionId,
-                objective,
-                planId,
-                workflowSteps,
-                fromIndex,
-                resolveResponseMode(sessionMemoryService.getOrCreate(sessionId))
-        );
-    }
-
-    Map<String, Object> executeContinuationStepsNode(OverAllState state) {
-        return lifecycleNodeHandler.executeContinuationStepsNode(state);
-    }
-
-    Map<String, Object> buildPostExecutionState(
-            String sessionId,
-            String objective,
-            String planId,
-            List<WorkflowStep> steps,
-            ResponseMode responseMode
-    ) {
-        // 先检查是否有 pendingFeedback，如果有则不继续执行后续步骤
-        Optional<HumanFeedbackRequest> pendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
-        if (pendingFeedback.isPresent()) {
-            log.warn("Plan {} paused - waiting for human intervention", planId);
-            return Map.of(
-                    "sessionId", sessionId,
-                    "objective", objective,
-                    GRAPH_PLAN_ID_KEY, planId,
-                    GRAPH_WORKFLOW_STEPS_KEY, steps,
-                    GRAPH_RESPONSE_MODE_KEY, responseMode,
-                    GRAPH_PENDING_FEEDBACK_KEY, pendingFeedback.get()
-            );
-        }
-
-        // 没有需要人工干预的步骤时，再检查未完成的步骤
-        Optional<Integer> unfinishedIndex = findFirstUnfinishedStepIndex(steps);
-        if (unfinishedIndex.isPresent()) {
-            log.warn(
-                    "Plan {} returned from step execution with unfinished step {}. Attempting one catch-up execution pass.",
-                    planId,
-                    unfinishedIndex.get() + 1
-            );
-            steps = executeStepsWithStatusTracking(sessionId, planId, steps, objective, unfinishedIndex.get());
-        }
-
-        // 再次检查是否有新的 pendingFeedback（在 catch-up 执行后可能产生）
-        Optional<HumanFeedbackRequest> newPendingFeedback = sessionMemoryService.getPendingFeedback(sessionId);
-        if (newPendingFeedback.isPresent()) {
-            log.warn("Plan {} paused after catch-up - waiting for human intervention", planId);
-            return Map.of(
-                    "sessionId", sessionId,
-                    "objective", objective,
-                    GRAPH_PLAN_ID_KEY, planId,
-                    GRAPH_WORKFLOW_STEPS_KEY, steps,
-                    GRAPH_RESPONSE_MODE_KEY, responseMode,
-                    GRAPH_PENDING_FEEDBACK_KEY, newPendingFeedback.get()
-            );
-        }
-
-        Optional<WorkflowStep> failedStep = findFailedStep(steps);
-        if (failedStep.isPresent()) {
-            return Map.of(
-                    "sessionId", sessionId,
-                    "objective", objective,
-                    GRAPH_PLAN_ID_KEY, planId,
-                    GRAPH_WORKFLOW_STEPS_KEY, steps,
-                    GRAPH_RESPONSE_MODE_KEY, responseMode,
-                    GRAPH_FAILED_STEP_KEY, failedStep.get()
-            );
-        }
-
-        Optional<Integer> remainingUnfinishedIndex = findFirstUnfinishedStepIndex(steps);
-        if (remainingUnfinishedIndex.isPresent()) {
-            int index = remainingUnfinishedIndex.get();
-            WorkflowStep unfinishedStep = steps.get(index);
-            WorkflowStep failedUnfinishedStep = unfinishedStep.withFailure(
-                    "Workflow execution ended before this planned step ran: " + unfinishedStep.getDescription(),
-                    unfinishedStep.getUsedTools(),
-                    unfinishedStep.getUsedCapabilities(),
-                    unfinishedStep.getArtifacts(),
-                    unfinishedStep.getToolOutputs(),
-                    unfinishedStep.getAttemptCount()
-            );
-            List<WorkflowStep> updatedSteps = new ArrayList<>(steps);
-            updatedSteps.set(index, failedUnfinishedStep);
-            return Map.of(
-                    "sessionId", sessionId,
-                    "objective", objective,
-                    GRAPH_PLAN_ID_KEY, planId,
-                    GRAPH_WORKFLOW_STEPS_KEY, updatedSteps,
-                    GRAPH_RESPONSE_MODE_KEY, responseMode,
-                    GRAPH_FAILED_STEP_KEY, failedUnfinishedStep
-            );
-        }
-
-        return Map.of(
-                "sessionId", sessionId,
-                "objective", objective,
-                GRAPH_PLAN_ID_KEY, planId,
-                GRAPH_WORKFLOW_STEPS_KEY, steps,
-                GRAPH_RESPONSE_MODE_KEY, responseMode
-        );
     }
 
     WorkflowExecutionResponse createPlanningFailureResponse(
@@ -453,40 +336,6 @@ public class WorkflowService {
         return createFailedResponse(objective, responseSteps, failedStep);
     }
 
-    String selectPostExecutionTransition(OverAllState state) {
-        return lifecycleNodeHandler.selectPostExecutionTransition(state);
-    }
-
-    Map<String, Object> returnGraphResponseNode(OverAllState state) {
-        return lifecycleNodeHandler.returnGraphResponseNode(state);
-    }
-
-    boolean hasGraphResponse(OverAllState state) {
-        return lifecycleNodeHandler.hasGraphResponse(state);
-    }
-
-    Map<String, Object> returnPausedAfterRunNode(OverAllState state) {
-        return lifecycleNodeHandler.returnPausedAfterRunNode(state);
-    }
-
-    Map<String, Object> returnFailedAfterRunNode(OverAllState state) {
-        return lifecycleNodeHandler.returnFailedAfterRunNode(state);
-    }
-
-    Map<String, Object> finalizeSuccessfulRunNode(OverAllState state) {
-        return lifecycleNodeHandler.finalizeSuccessfulRunNode(state);
-    }
-
-    WorkflowExecutionResponse finalizeSuccessfulExecution(
-            String sessionId,
-            String planId,
-            String objective,
-            List<WorkflowStep> executedSteps,
-            ResponseMode responseMode
-    ) {
-        return finalizeSuccessfulExecution(sessionId, planId, objective, executedSteps, responseMode, null);
-    }
-
     WorkflowExecutionResponse finalizeSuccessfulExecution(
             String sessionId,
             String planId,
@@ -495,136 +344,26 @@ public class WorkflowService {
             ResponseMode responseMode,
             IntentResolution intentResolution
     ) {
-        WorkflowExecutionResponse response = graphOrchestrator.invokeOutputEvaluationGraph(
-                sessionId,
-                planId,
-                objective,
-                executedSteps,
-                responseMode,
-                intentResolution
+        // 直接创建响应，不需要调用旧的图方法
+        OutputEvaluationResult evalResult = null;
+        if (shouldEvaluateOutput(responseMode)) {
+            OutputEvaluationDecision decision = evaluateOutput(objective, executedSteps, responseMode);
+            evalResult = decision.toResult(0, DEFAULT_OUTPUT_EVALUATION_MAX_RETRIES, false);
+        }
+
+        WorkflowExecutionResponse response = createCompletedResponse(
+                objective, executedSteps, responseMode, evalResult, intentResolution
         );
+
         Session session = sessionMemoryService.getOrCreate(sessionId);
         sessionMemoryService.saveSession(session.addAssistantMessage(response.content()));
 
-        // 更新工作流状态为 COMPLETED
-        String deliverable = response.deliverable();
-        sessionMemoryService.saveWorkflowState(sessionId, WorkflowState.completed(objective, planId, deliverable));
+        // 释放检查点（工作流已完成）
+        checkpointService.release(sessionId);
 
         return response;
     }
 
-    Map<String, Object> maybeSkipOutputEvaluationNode(OverAllState state) {
-        return lifecycleNodeHandler.maybeSkipOutputEvaluationNode(state);
-    }
-
-    Map<String, Object> evaluateCurrentOutputNode(OverAllState state) {
-        return lifecycleNodeHandler.evaluateCurrentOutputNode(state);
-    }
-
-    String selectOutputEvaluationTransition(OverAllState state) {
-        return lifecycleNodeHandler.selectOutputEvaluationTransition(state);
-    }
-
-    Map<String, Object> retryOutputWorkflowNode(OverAllState state) {
-        return lifecycleNodeHandler.retryOutputWorkflowNode(state);
-    }
-
-    Map<String, Object> completeWithCurrentOutputNode(OverAllState state) {
-        return lifecycleNodeHandler.completeWithCurrentOutputNode(state);
-    }
-
-    Map<String, Object> failFromOutputEvaluationNode(OverAllState state) {
-        return lifecycleNodeHandler.failFromOutputEvaluationNode(state);
-    }
-
-    WorkflowExecutionResponse skipCurrentStep(String sessionId, HumanFeedbackRequest pendingFeedback) {
-        List<WorkflowStep> workflowSteps = copyWorkflowSteps(resolveWorkflowSteps(pendingFeedback));
-        WorkflowStep failedStep = pendingFeedback.getFailedStep();
-        String skippedMessage = ResponseLanguageHelper.choose(
-                pendingFeedback.getObjective(),
-                "\u5df2\u6839\u636e\u7528\u6237\u53cd\u9988\u8df3\u8fc7\u5f53\u524d\u6b65\u9aa4\u3002",
-                "Skipped after human feedback."
-        );
-
-        WorkflowStep skippedStep = new WorkflowStep(
-                failedStep.getAgent(),
-                failedStep.getDescription(),
-                failedStep.getRequiredTools(),
-                failedStep.getUsedTools(),
-                failedStep.getParameterContext(),
-                StepStatus.SKIPPED,
-                skippedMessage,
-                failedStep.getStartTime(),
-                LocalDateTime.now(),
-                null,
-                failedStep.getAttemptCount(),
-                false
-        );
-        if (pendingFeedback.getStepIndex() < workflowSteps.size()) {
-            workflowSteps.set(pendingFeedback.getStepIndex(), skippedStep);
-        } else {
-            workflowSteps.add(skippedStep);
-        }
-
-        return continueExecution(
-                sessionId,
-                pendingFeedback.getObjective(),
-                pendingFeedback.getPlanId(),
-                workflowSteps,
-                pendingFeedback.getStepIndex() + 1
-        );
-    }
-
-    WorkflowExecutionResponse abortPlan(String sessionId, HumanFeedbackRequest pendingFeedback) {
-        List<WorkflowStep> allSteps = resolveWorkflowSteps(pendingFeedback);
-        List<String> executionLog = toExecutionLog(allSteps);
-        String baseMessage = ResponseLanguageHelper.choose(
-                pendingFeedback.getObjective(),
-                String.format(
-                        "\u5de5\u4f5c\u6d41\u5df2\u6839\u636e\u7528\u6237\u53cd\u9988\u7ec8\u6b62\u3002%n%n\u8ba1\u5212ID: %s%n\u5f53\u524d\u6b65\u9aa4: %s%n\u539f\u56e0: %s",
-                        pendingFeedback.getPlanId(),
-                        pendingFeedback.getFailedStep().getDescription(),
-                        pendingFeedback.getErrorMessage()
-                ),
-                String.format(
-                        "Workflow aborted after human feedback.%n%nPlan ID: %s%nCurrent step: %s%nReason: %s",
-                        pendingFeedback.getPlanId(),
-                        pendingFeedback.getFailedStep().getDescription(),
-                        pendingFeedback.getErrorMessage()
-                )
-        );
-        String content = formatSummaryMessage(new WorkflowSummaryContext(
-                pendingFeedback.getObjective(),
-                WorkflowExecutionStatus.ABORTED,
-                pendingFeedback.getFailedStep().getDescription(),
-                baseMessage,
-                pendingFeedback.getFailedStep(),
-                null,
-                allSteps,
-                collectResponseArtifacts(allSteps),
-                executionLog
-        ));
-        WorkflowSummary summary = buildSummary(
-                pendingFeedback.getObjective(),
-                allSteps,
-                WorkflowExecutionStatus.ABORTED,
-                pendingFeedback.getFailedStep().getDescription(),
-                null
-        );
-
-        Session session = sessionMemoryService.getOrCreate(sessionId);
-        sessionMemoryService.saveSession(session.addAssistantMessage(content));
-
-        return new WorkflowExecutionResponse(
-                pendingFeedback.getObjective(),
-                null,  // deliverable
-                content,
-                collectResponseArtifacts(allSteps),
-                summary,
-                allSteps,
-                null
-        );
-    }
 
     List<WorkflowStep> executeStepsWithStatusTracking(
             String sessionId,
@@ -633,11 +372,13 @@ public class WorkflowService {
             String objective,
             int startIndexOffset
     ) {
-        return graphOrchestrator.invokeStepExecutionGraph(sessionId, planId, workflowSteps, objective, startIndexOffset);
+        // 此方法已废弃 - 工作流执行现在通过统一图完成
+        log.warn("executeStepsWithStatusTracking is deprecated, use unified graph execution");
+        return workflowSteps;
     }
 
     Map<String, Object> executeSingleStepNode(OverAllState state) {
-        return stepExecutionHandler.executeSingleStepNode(state);
+        return lifecycleNodeHandler.executeStepNode(state);
     }
 
     ExecutionResult executeStepWithRetry(
@@ -673,7 +414,7 @@ public class WorkflowService {
 
                 SkillLoadResult skillLoadResult = loadDeclaredSkill(effectiveStep);
                 if (skillLoadResult.error != null) {
-                    return new ExecutionResult(false, null, skillLoadResult.usedTools, skillLoadResult.usedToolCalls, List.of(), List.of(), false, skillLoadResult.error, attempt);
+                    return new ExecutionResult(false, null, skillLoadResult.usedTools, skillLoadResult.usedToolCalls, List.of(), List.of(), false, skillLoadResult.error, attempt, false);
                 }
 
                 AgentExecutionResult execution = agent.execute(
@@ -700,7 +441,7 @@ public class WorkflowService {
                         continue;
                     }
                     if (attempt >= maxAttempts) {
-                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, skillValidationError, attempt);
+                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, "[recovery exhausted] " + skillValidationError, attempt, true);
                     }
                     continue;
                 }
@@ -712,7 +453,7 @@ public class WorkflowService {
                         case SUCCESS -> {
                             String validationError = validateCompletedStep(effectiveStep, usedTools, usedToolCalls, outcome);
                             if (validationError == null) {
-                                return new ExecutionResult(true, outcomeMessage, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, null, attempt);
+                                return new ExecutionResult(true, outcomeMessage, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, null, attempt, false);
                             }
                             error = validationError;
                             log.warn("Step {} failed validation: {}", stepIndex + 1, validationError);
@@ -723,7 +464,7 @@ public class WorkflowService {
                                 continue;
                             }
                             if (attempt >= maxAttempts) {
-                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, validationError, attempt);
+                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, "[recovery exhausted] " + validationError, attempt, true);
                             }
                             continue;
                         }
@@ -749,7 +490,8 @@ public class WorkflowService {
                                     toolOutputs,
                                     needsHumanFeedback,
                                     error,
-                                    attempt
+                                    attempt,
+                                    false
                             );
                         }
                         case RETRYABLE_ERROR -> {
@@ -761,7 +503,7 @@ public class WorkflowService {
                                 continue;
                             }
                             if (attempt >= maxAttempts) {
-                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, error, attempt);
+                                return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, "[recovery exhausted] " + error, attempt, true);
                             }
                             continue;
                         }
@@ -773,7 +515,7 @@ public class WorkflowService {
                                 error = appendLazyHelperRetryHint(error, effectiveStep);
                                 continue;
                             }
-                            return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, error, attempt);
+                            return new ExecutionResult(false, null, usedTools, usedToolCalls, outcome.artifacts(), toolOutputs, false, "[recovery exhausted] " + error, attempt, true);
                         }
                     }
                 }
@@ -782,7 +524,7 @@ public class WorkflowService {
                 if (detection == ParameterMissingDetector.DetectionResult.SUCCESS) {
                     String validationError = validateCompletedStep(effectiveStep, usedTools, usedToolCalls, null);
                     if (validationError == null) {
-                        return new ExecutionResult(true, result, usedTools, usedToolCalls, List.of(), toolOutputs, false, null, attempt);
+                        return new ExecutionResult(true, result, usedTools, usedToolCalls, List.of(), toolOutputs, false, null, attempt, false);
                     }
                     error = validationError;
                     log.warn("Step {} failed validation: {}", stepIndex + 1, validationError);
@@ -793,7 +535,7 @@ public class WorkflowService {
                         continue;
                     }
                     if (attempt >= maxAttempts) {
-                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, validationError, attempt);
+                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, "[recovery exhausted] " + validationError, attempt, true);
                     }
                     continue;
                 }
@@ -817,7 +559,7 @@ public class WorkflowService {
                         String finalError = needsHumanFeedback
                                 ? error
                                 : buildInferenceExhaustedError(error, inferencePolicy);
-                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, needsHumanFeedback, finalError, attempt);
+                        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, needsHumanFeedback, finalError, attempt, false);
                     }
                     continue;
                 }
@@ -827,7 +569,7 @@ public class WorkflowService {
                     continue;
                 }
 
-                return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
+                return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, "[recovery exhausted] " + error, attempt, true);
             } catch (Exception e) {
                 log.error("Step {} execution exception", stepIndex + 1, e);
                 error = e.getMessage();
@@ -841,12 +583,12 @@ public class WorkflowService {
                     continue;
                 }
                 if (attempt >= maxAttempts) {
-                    return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
+                    return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, "[recovery exhausted] " + error, attempt, true);
                 }
             }
         }
 
-        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, error, attempt);
+        return new ExecutionResult(false, null, usedTools, usedToolCalls, List.of(), toolOutputs, false, "[recovery exhausted] " + error, attempt, true);
     }
 
     private ExecutionResult tryExecuteDirectWorkspaceWrite(WorkflowStep step, int attempt) {
@@ -875,7 +617,8 @@ public class WorkflowService {
                         List.of("writeWorkspaceFile|\"Wrote file: " + normalizeWorkspaceRelativePath(relativePath).replace("\\", "\\\\") + "\""),
                         false,
                         null,
-                        attempt
+                        attempt,
+                        false
                 );
         } catch (Exception ex) {
             return new ExecutionResult(
@@ -887,7 +630,8 @@ public class WorkflowService {
                     List.of(),
                     false,
                     "Failed to write workspace file directly: " + ex.getMessage(),
-                    attempt
+                    attempt,
+                    false
             );
         }
     }
@@ -1526,7 +1270,7 @@ public class WorkflowService {
         return List.copyOf(artifacts);
     }
 
-    private List<String> collectResponseArtifacts(List<WorkflowStep> steps) {
+    List<String> collectResponseArtifacts(List<WorkflowStep> steps) {
         if (steps == null || steps.isEmpty()) {
             return List.of();
         }
@@ -2124,6 +1868,13 @@ public class WorkflowService {
         }
 
         String normalized = errorMessage.toLowerCase();
+        if (normalized.contains("[recovery exhausted]")) {
+            return ResponseLanguageHelper.choose(
+                    objective,
+                    "\u5f53\u524d\u6b65\u9aa4\u6267\u884c\u5931\u8d25\uff0c\u5df2\u5c1d\u8bd5\u6240\u6709\u6062\u590d\u7b56\u7565\u3002\n\n\u8bf7\u9009\u62e9\uff1a\n1. \u8df3\u8fc7\u6b64\u6b65\u9aa4\u7ee7\u7eed\u6267\u884c\u540e\u7eed\u6b65\u9aa4\n2. \u91cd\u8bd5\u6b64\u6b65\u9aa4\n3. \u63d0\u4f9b\u8865\u5145\u4fe1\u606f\u540e\u91cd\u8bd5\n4. \u7ec8\u6b62\u6574\u4e2a\u5de5\u4f5c\u6d41",
+                    "All recovery strategies have been exhausted for this step.\n\nPlease choose:\n1. Skip this step and continue\n2. Retry this step\n3. Provide additional info and retry\n4. Abort the entire workflow"
+            );
+        }
         if (normalized.contains("forecast") || normalized.contains("current weather")) {
             return ResponseLanguageHelper.choose(
                     objective,
@@ -2369,7 +2120,12 @@ public class WorkflowService {
 
     /**
      * 生成最终交付内容
-     * 尝试从已完成的步骤中整合数据
+     * 策略：
+     * 1. 单步骤：直接返回结果
+     * 2. 多步骤：智能判断最后一步是否已是完整答案
+     *    - 是：直接返回最后一步结果
+     *    - 否：LLM综合所有结果
+     * 3. needsFile：返回产物地址
      */
     private String generateDeliverable(
             String objective,
@@ -2382,49 +2138,305 @@ public class WorkflowService {
         }
 
         // 收集所有成功步骤的结果
-        List<String> completedResults = new ArrayList<>();
-        for (WorkflowStep step : steps) {
-            if (step != null && step.isCompleted() && step.getResult() != null && !step.getResult().isBlank()) {
-                completedResults.add(step.getResult().trim());
+        List<WorkflowStep> completedSteps = steps.stream()
+                .filter(s -> s != null && s.isCompleted() && s.getResult() != null && !s.getResult().isBlank())
+                .toList();
+
+        if (completedSteps.isEmpty()) {
+            // 没有成功结果，检查 artifacts
+            if (artifacts != null && !artifacts.isEmpty()) {
+                return formatArtifactsOutput(objective, artifacts);
             }
+            return null;
         }
 
-        if (!completedResults.isEmpty()) {
-            // 如果只有一个结果，直接返回
-            if (completedResults.size() == 1) {
-                return completedResults.get(0);
-            }
+        // 情况1：单步骤，直接返回
+        if (completedSteps.size() == 1) {
+            return completedSteps.get(0).getResult();
+        }
 
-            // 多个结果时，整合输出
-            boolean chinese = ResponseLanguageHelper.detect(objective) == ResponseLanguageHelper.Language.ZH_CN;
-            StringBuilder sb = new StringBuilder();
+        // 情况2：多步骤，智能判断
+        String lastResult = completedSteps.get(completedSteps.size() - 1).getResult();
 
-            if (chinese) {
-                sb.append("## 执行结果汇总\n\n");
-            } else {
-                sb.append("## Execution Summary\n\n");
-            }
+        // 检查最后一步是否已经是完整的最终答案
+        if (FinalAnswerDetector.isCompleteDeliverable(lastResult)) {
+            return lastResult;
+        }
 
-            for (int i = 0; i < completedResults.size(); i++) {
-                sb.append(completedResults.get(i));
-                if (i < completedResults.size() - 1) {
-                    sb.append("\n\n");
+        // 最后一步不是完整答案，需要LLM综合
+        return synthesizeWithLLM(objective, completedSteps);
+    }
+
+    /**
+     * 格式化产物输出
+     */
+    private String formatArtifactsOutput(String objective, List<String> artifacts) {
+        return ResponseLanguageHelper.choose(
+                objective,
+                "已生成产物：\n- " + String.join("\n- ", artifacts),
+                "Artifacts generated:\n- " + String.join("\n- ", artifacts)
+        );
+    }
+
+    /**
+     * 使用LLM综合多个步骤的结果
+     *
+     * 改进点：
+     * 1. 传入原始 objective 让 LLM 理解用户真实需求
+     * 2. 使用 toolOutputs 保留原始数据
+     * 3. 根据意图推断输出类型，提供定制化指导
+     * 4. 明确"成品输出"原则
+     */
+    private String synthesizeWithLLM(String objective, List<WorkflowStep> completedSteps) {
+        // 1. 构建详细的数据部分（使用原始工具输出）
+        StringBuilder dataSection = new StringBuilder();
+        for (WorkflowStep step : completedSteps) {
+            dataSection.append("### ").append(step.getDescription()).append("\n");
+            // 优先使用原始工具输出
+            if (step.getToolOutputs() != null && !step.getToolOutputs().isEmpty()) {
+                for (String output : step.getToolOutputs()) {
+                    if (output != null && !output.isBlank()) {
+                        // 提取工具输出部分（去掉工具名前缀）
+                        String toolData = extractToolOutput(output);
+                        dataSection.append("```\n").append(toolData).append("\n```\n\n");
+                    }
                 }
+            } else if (step.getResult() != null && !step.getResult().isBlank()) {
+                dataSection.append(step.getResult()).append("\n\n");
             }
-
-            return sb.toString();
         }
 
-        // 如果有 artifacts，返回产物列表
-        if (artifacts != null && !artifacts.isEmpty()) {
-            return ResponseLanguageHelper.choose(
-                    objective,
-                    "已生成产物：\n- " + String.join("\n- ", artifacts),
-                    "Artifacts generated:\n- " + String.join("\n- ", artifacts)
+        // 2. 推断输出类型并生成指导
+        String outputGuidance = inferOutputGuidance(objective);
+
+        // 3. 构建完整的 prompt
+        String dataContent = dataSection.toString();
+        if (dataContent.isBlank()) {
+            dataContent = "（未收集到数据）";
+        }
+
+        String synthesisPrompt = ResponseLanguageHelper.choose(
+                objective,
+                """
+                        ## 用户原始请求
+
+                        %s
+
+                        ## 已收集的数据
+
+                        %s
+
+                        %s
+
+                        ## 输出要求
+
+                        1. **直接输出最终结果**，不要解释数据来源或执行过程
+                        2. 使用用户的语言（中文）
+                        3. 使用 Markdown 格式，结构清晰
+                        4. 内容必须完整、实用、可直接使用
+                        5. 满足用户的原始需求，而不是堆砌原始数据
+                        """,
+                """
+                        ## User's Original Request
+
+                        %s
+
+                        ## Collected Data
+
+                        %s
+
+                        %s
+
+                        ## Output Requirements
+
+                        1. **Directly output the final result**, do not explain data sources or execution process
+                        2. Use the user's language
+                        3. Use Markdown format with clear structure
+                        4. Content must be complete, practical, and ready to use
+                        5. Meet the user's original request, not just pile up raw data
+                        """
+        ).formatted(objective, dataContent, outputGuidance);
+
+        return chatClient.prompt()
+                .system("""
+                    You are a professional content generation assistant.
+
+                    Your task is to generate the final deliverable that the user expects based on their original request and the collected data.
+
+                    Key principles:
+                    - Understand what the user really needs, not just pile up data
+                    - The output should be a "finished product" that the user can use directly
+                    - Do NOT use process-oriented language like "Based on the data..." or "In summary..."
+                    - Directly output the final result
+                    """)
+                .user(synthesisPrompt)
+                .call()
+                .content();
+    }
+
+    /**
+     * 从工具输出中提取数据部分（去掉工具名前缀）
+     */
+    private String extractToolOutput(String toolOutput) {
+        if (toolOutput == null) {
+            return "";
+        }
+        int pipeIndex = toolOutput.indexOf('|');
+        if (pipeIndex >= 0 && pipeIndex < toolOutput.length() - 1) {
+            return toolOutput.substring(pipeIndex + 1).trim();
+        }
+        return toolOutput.trim();
+    }
+
+    /**
+     * 根据用户意图推断输出类型和必需元素
+     */
+    private String inferOutputGuidance(String objective) {
+        String lowerObjective = objective.toLowerCase();
+
+        // 计划/行程类任务
+        if (lowerObjective.contains("计划") || lowerObjective.contains("行程")
+                || lowerObjective.contains("安排") || lowerObjective.contains("itinerary")
+                || lowerObjective.contains("plan") || lowerObjective.contains("schedule")) {
+            return ResponseLanguageHelper.choose(objective,
+                """
+                        ## 输出指导
+
+                        这是一个计划/行程类任务。请生成完整的日程安排：
+
+                        - **按时间顺序组织**：Day 1, Day 2... 或 日期+星期
+                        - **每天包含**：
+                          - 具体活动和时间安排
+                          - 地点/景点名称
+                          - 交通建议（如需要）
+                          - 餐饮推荐（如需要）
+                        - **考虑用户提到的特殊需求**：如工作日、购物日、休息日
+                        - **提供实用建议**：如预约方式、最佳游览时间、注意事项
+
+                        示例格式：
+                        ### Day 1 (4月8日 周三) - 抵达日
+                        ...
+                        """,
+                """
+                        ## Output Guidance
+
+                        This is a plan/itinerary task. Please generate a complete schedule:
+
+                        - **Organize by time**: Day 1, Day 2... or Date + Day of week
+                        - **Each day includes**:
+                          - Specific activities and timing
+                          - Locations/attractions
+                          - Transportation suggestions (if needed)
+                          - Dining recommendations (if needed)
+                        - **Consider user's special requirements**: e.g., work day, shopping day, rest day
+                        - **Provide practical tips**: e.g., booking info, best visiting times, notes
+
+                        Example format:
+                        ### Day 1 (April 8, Wed) - Arrival Day
+                        ...
+                        """
             );
         }
 
-        return null;
+        // 报告/分析类任务
+        if (lowerObjective.contains("报告") || lowerObjective.contains("分析")
+                || lowerObjective.contains("调研") || lowerObjective.contains("report")
+                || lowerObjective.contains("analysis") || lowerObjective.contains("research")) {
+            return ResponseLanguageHelper.choose(objective,
+                """
+                        ## 输出指导
+
+                        这是一个报告/分析类任务。请生成完整的分析报告：
+
+                        - **结构清晰**：概述 → 分析 → 结论 → 建议
+                        - **包含数据支撑**：使用收集到的数据
+                        - **提供洞察**：不仅仅是数据罗列，而是有意义的分析
+                        - **可执行的建议**：如果适用
+
+                        示例格式：
+                        ### 概述
+                        ...
+                        ### 分析
+                        ...
+                        ### 结论
+                        ...
+                        """,
+                """
+                        ## Output Guidance
+
+                        This is a report/analysis task. Please generate a complete report:
+
+                        - **Clear structure**: Overview → Analysis → Conclusion → Recommendations
+                        - **Include data support**: Use the collected data
+                        - **Provide insights**: Not just data listing, but meaningful analysis
+                        - **Actionable recommendations**: If applicable
+
+                        Example format:
+                        ### Overview
+                        ...
+                        ### Analysis
+                        ...
+                        ### Conclusion
+                        ...
+                        """
+            );
+        }
+
+        // 推荐类任务
+        if (lowerObjective.contains("推荐") || lowerObjective.contains("建议")
+                || lowerObjective.contains("选") || lowerObjective.contains("recommend")
+                || lowerObjective.contains("suggestion")) {
+            return ResponseLanguageHelper.choose(objective,
+                """
+                        ## 输出指导
+
+                        这是一个推荐类任务。请生成详细的推荐列表：
+
+                        - **说明推荐理由**：为什么推荐这个
+                        - **提供实用信息**：如价格、地址、联系方式、特色
+                        - **按优先级或类别组织**
+                        - **适合目标受众**：考虑用户的需求和偏好
+
+                        示例格式：
+                        ### 推荐 1: [名称]
+                        - 推荐理由：...
+                        - 实用信息：...
+                        """,
+                """
+                        ## Output Guidance
+
+                        This is a recommendation task. Please generate a detailed recommendation list:
+
+                        - **Explain why**: Why you recommend this
+                        - **Provide practical info**: e.g., price, address, features
+                        - **Organize by priority or category**
+                        - **Fit for target audience**: Consider user's needs and preferences
+
+                        Example format:
+                        ### Recommendation 1: [Name]
+                        - Why: ...
+                        - Practical info: ...
+                        """
+            );
+        }
+
+        // 默认：通用任务
+        return ResponseLanguageHelper.choose(objective,
+                """
+                        ## 输出指导
+
+                        请根据用户请求，生成完整、实用的答案。
+                        输出应该是"成品"，用户可以直接使用。
+                        不要堆砌原始数据，而是整合成有意义的结论或建议。
+                        """,
+                """
+                        ## Output Guidance
+
+                        Please generate a complete, practical answer based on the user's request.
+                        The output should be a "finished product" that the user can use directly.
+                        Do not pile up raw data - instead, synthesize into meaningful conclusions or recommendations.
+                        """
+        );
     }
 
     WorkflowExecutionResponse createOutputEvaluationFailureResponse(
@@ -2510,7 +2522,7 @@ public class WorkflowService {
         );
     }
 
-    private String formatSummaryMessage(WorkflowSummaryContext context) {
+    String formatSummaryMessage(WorkflowSummaryContext context) {
         if (context == null) {
             return "";
         }
@@ -2526,7 +2538,7 @@ public class WorkflowService {
         return context.baseMessage() == null ? "" : context.baseMessage();
     }
 
-    private WorkflowSummary buildSummary(
+    WorkflowSummary buildSummary(
             String objective,
             List<WorkflowStep> steps,
             WorkflowExecutionStatus status,
@@ -2881,7 +2893,7 @@ public class WorkflowService {
         }
     }
 
-    private List<String> toExecutionLog(List<WorkflowStep> steps) {
+    List<String> toExecutionLog(List<WorkflowStep> steps) {
         return steps.stream()
                 .map(this::toExecutionLogEntry)
                 .filter(entry -> entry != null && !entry.isBlank())
@@ -3167,7 +3179,7 @@ public class WorkflowService {
     }
 
     private String extractReusableTextPayload(String toolOutputEntry) {
-        String rawOutput = extractToolOutput(toolOutputEntry);
+        String rawOutput = extractToolOutputFromEntry(toolOutputEntry);
         if (rawOutput == null || rawOutput.isBlank()) {
             return null;
         }
@@ -3224,7 +3236,7 @@ public class WorkflowService {
         return null;
     }
 
-    private String extractToolOutput(String toolOutputEntry) {
+    private String extractToolOutputFromEntry(String toolOutputEntry) {
         if (toolOutputEntry == null || toolOutputEntry.isBlank()) {
             return null;
         }
@@ -3271,8 +3283,13 @@ public class WorkflowService {
         }
         prompt.append("\n\nParameter context:\n");
         int count = 0;
+        // 评估相关字段不应该作为参数显示，它们有单独的处理逻辑
+        Set<String> evaluationKeys = Set.of(
+            "evaluationSummary", "evaluationIssues", "evaluationRevisionPrompt", "evaluationRetryCount"
+        );
         for (Map.Entry<String, Object> entry : step.getParameterContext().entrySet()) {
-            if ("lazyLoadedHelperTools".equals(entry.getKey())) {
+            String key = entry.getKey();
+            if ("lazyLoadedHelperTools".equals(key) || evaluationKeys.contains(key)) {
                 continue;
             }
             count++;
@@ -3281,10 +3298,54 @@ public class WorkflowService {
                 break;
             }
             prompt.append("- ")
-                    .append(entry.getKey())
+                    .append(key)
                     .append(": ")
                     .append(formatPromptContextValue(entry.getValue()))
                     .append("\n");
+        }
+
+        // 单独处理评估上下文
+        appendEvaluationContextPrompt(prompt, step.getParameterContext());
+    }
+
+    /**
+     * 追加评估上下文到 prompt，用于指导 agent 修正输出。
+     */
+    private void appendEvaluationContextPrompt(StringBuilder prompt, Map<String, Object> parameterContext) {
+        if (parameterContext == null) {
+            return;
+        }
+
+        String evaluationSummary = (String) parameterContext.get("evaluationSummary");
+        String evaluationIssues = (String) parameterContext.get("evaluationIssues");
+        String evaluationRevisionPrompt = (String) parameterContext.get("evaluationRevisionPrompt");
+        Integer evaluationRetryCount = (Integer) parameterContext.get("evaluationRetryCount");
+
+        if (evaluationSummary == null && evaluationIssues == null && evaluationRevisionPrompt == null) {
+            return;
+        }
+
+        prompt.append("\n\n--- OUTPUT REVISION GUIDANCE ---\n");
+        prompt.append("Previous output was evaluated and needs revision:\n\n");
+
+        if (evaluationSummary != null) {
+            prompt.append("Evaluation summary: ").append(evaluationSummary).append("\n\n");
+        }
+
+        if (evaluationIssues != null && !evaluationIssues.isBlank()) {
+            prompt.append("Issues to fix:\n");
+            for (String issue : evaluationIssues.split(";")) {
+                prompt.append("- ").append(issue.trim()).append("\n");
+            }
+            prompt.append("\n");
+        }
+
+        if (evaluationRevisionPrompt != null && !evaluationRevisionPrompt.isBlank()) {
+            prompt.append("Revision instructions: ").append(evaluationRevisionPrompt).append("\n\n");
+        }
+
+        if (evaluationRetryCount != null && evaluationRetryCount > 0) {
+            prompt.append("This is revision attempt #").append(evaluationRetryCount + 1).append(". Please address the issues above.\n");
         }
     }
 
@@ -3665,6 +3726,7 @@ public class WorkflowService {
         final boolean needsHumanFeedback;
         final String error;
         final int attempts;
+        final boolean recoveryExhausted;
 
         ExecutionResult(
                 boolean success,
@@ -3675,7 +3737,8 @@ public class WorkflowService {
                 List<String> toolOutputs,
                 boolean needsHumanFeedback,
                 String error,
-                int attempts
+                int attempts,
+                boolean recoveryExhausted
         ) {
             this.success = success;
             this.result = result;
@@ -3686,6 +3749,7 @@ public class WorkflowService {
             this.needsHumanFeedback = needsHumanFeedback;
             this.error = error;
             this.attempts = attempts;
+            this.recoveryExhausted = recoveryExhausted;
         }
     }
 
