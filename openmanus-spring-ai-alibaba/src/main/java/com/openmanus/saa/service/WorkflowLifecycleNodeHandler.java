@@ -78,7 +78,7 @@ final class WorkflowLifecycleNodeHandler {
                 .map(service::coerceWorkflowSteps)
                 .orElse(List.of());
 
-        // 如果计划为空或快速路径，直接汇总
+        // 如果计划为空，快速路径
         if (steps.isEmpty()) {
             String objective = state.value("objective", String.class).orElseThrow();
             ResponseMode responseMode = state.value(WorkflowCheckpointService.RESPONSE_MODE_KEY, ResponseMode.class)
@@ -89,8 +89,30 @@ final class WorkflowLifecycleNodeHandler {
             );
         }
 
-        // 否则继续执行
-        return Map.of();
+        // Plan 评估
+        String objective = state.value("objective", String.class).orElseThrow();
+        String sessionId = state.value("sessionId", String.class).orElse(null);
+        IntentResolution intentResolution = state.value(WorkflowCheckpointService.INTENT_RESOLUTION_KEY, IntentResolution.class)
+                .orElse(null);
+        ResponseMode responseMode = state.value(WorkflowCheckpointService.RESPONSE_MODE_KEY, ResponseMode.class)
+                .orElse(ResponseMode.WORKFLOW_SUMMARY);
+        PlanEvaluationResult evaluation = service.evaluatePlan(objective, steps, intentResolution);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("planEvaluationResult", evaluation);
+
+        // 如果需要修订 plan，触发 HITL
+        if (evaluation.needsRevision()) {
+            HumanFeedbackRequest pendingFeedback = service.createPlanRevisionFeedbackRequest(
+                    objective, evaluation.revisionSuggestion(), evaluation.missingElements(), steps
+            );
+            result.put("pendingFeedback", pendingFeedback);
+            result.put(WorkflowCheckpointService.FEEDBACK_WAIT_KEY, true);
+            result.put(WorkflowCheckpointService.WORKFLOW_RESPONSE_KEY,
+                    service.createPlanRevisionResponse(objective, steps, responseMode, pendingFeedback));
+        }
+
+        return result;
     }
 
     /**
@@ -488,7 +510,21 @@ final class WorkflowLifecycleNodeHandler {
         List<WorkflowStep> steps = state.value(WorkflowCheckpointService.WORKFLOW_STEPS_KEY, Object.class)
                 .map(service::coerceWorkflowSteps)
                 .orElse(List.of());
-        return steps.isEmpty() ? "finalize" : "execute";
+
+        if (steps.isEmpty()) {
+            return "finalize";
+        }
+
+        // 检查 Plan 评估结果
+        PlanEvaluationResult evaluation = state.value("planEvaluationResult", PlanEvaluationResult.class)
+                .orElse(PlanEvaluationResult.ok());
+
+        if (evaluation.needsRevision()) {
+            // 触发 HITL，让用户确认是否修订 plan
+            return "planRevision";
+        }
+
+        return "execute";
     }
 
     String selectExecuteStepTransition(OverAllState state) {

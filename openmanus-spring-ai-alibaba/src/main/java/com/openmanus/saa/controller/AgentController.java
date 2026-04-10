@@ -68,12 +68,12 @@ public class AgentController {
         ConversationContext context = contextFactory.create(request.sessionId(), request.prompt());
 
         // 检查是否有暂停的工作流需要恢复
-        if (context.hasPausedWorkflow()) {
+        if (context.hasPausedWorkflow() && context.pendingFeedback().isPresent()) {
             log.info(
                 "Routing /api/agent/chat request as workflow feedback for session {}",
                 request.sessionId()
             );
-            HumanFeedbackRequest pendingFeedback = context.workflowState().pendingFeedback();
+            HumanFeedbackRequest pendingFeedback = context.pendingFeedback().get();
             WorkflowFeedbackRequest feedbackRequest = new WorkflowFeedbackRequest(
                 request.sessionId(),
                 null,

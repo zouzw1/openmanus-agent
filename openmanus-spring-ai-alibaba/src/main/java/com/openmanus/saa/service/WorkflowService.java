@@ -15,6 +15,7 @@ import com.openmanus.saa.model.InferencePolicy;
 import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.OutputEvaluationResult;
 import com.openmanus.saa.model.OutputEvaluationStatus;
+import com.openmanus.saa.model.PlanEvaluationResult;
 import com.openmanus.saa.model.ResponseMode;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.StepStatus;
@@ -1772,6 +1773,52 @@ public class WorkflowService {
         );
     }
 
+    /**
+     * 创建 Plan 修订反馈请求。
+     */
+    HumanFeedbackRequest createPlanRevisionFeedbackRequest(
+            String objective,
+            String revisionSuggestion,
+            List<String> missingElements,
+            List<WorkflowStep> steps
+    ) {
+        String suggestedAction = ResponseLanguageHelper.choose(
+                objective,
+                "建议操作：\n1. 同意添加整合步骤\n2. 忽略建议继续执行\n3. 修改 plan 内容",
+                "Suggested actions:\n1. Accept and add integration step\n2. Ignore and continue\n3. Modify the plan"
+        );
+        return new HumanFeedbackRequest(
+                null, // sessionId
+                objective,
+                null, // planId
+                -1,   // stepIndex (-1 表示 plan 级别)
+                null, // failedStep
+                steps,
+                "缺少最终整合步骤: " + String.join(", ", missingElements),
+                suggestedAction
+        );
+    }
+
+    /**
+     * 创建 Plan 修订响应。
+     */
+    WorkflowExecutionResponse createPlanRevisionResponse(
+            String objective,
+            List<WorkflowStep> steps,
+            ResponseMode responseMode,
+            HumanFeedbackRequest pendingFeedback
+    ) {
+        return new WorkflowExecutionResponse(
+                objective,
+                null, // deliverable
+                null, // content
+                List.of(), // artifacts
+                null, // summary
+                steps,
+                pendingFeedback
+        );
+    }
+
     private ParsedStepOutcome parseStepOutcome(String rawResult) {
         if (rawResult == null || rawResult.isBlank()) {
             return new ParsedStepOutcome(null, rawResult);
@@ -3275,6 +3322,82 @@ public class WorkflowService {
 
     boolean shouldEvaluateOutput(ResponseMode responseMode) {
         return responseMode == ResponseMode.FINAL_DELIVERABLE || responseMode == ResponseMode.HYBRID;
+    }
+
+    /**
+     * 评估 plan 是否需要修订。
+     *
+     * 判断逻辑：
+     * 1. 单步骤任务 → 不需要（直接执行）
+     * 2. 产出文件类（needsFile）→ 不需要（skill 直接输出）
+     * 3. 多步骤但最后一步已是整合类 → 不需要
+     * 4. 多步骤且最后一步不是整合类，且有多个收集步骤 → 建议添加整合步骤
+     */
+    PlanEvaluationResult evaluatePlan(
+            String objective,
+            List<WorkflowStep> steps,
+            IntentResolution intentResolution
+    ) {
+        if (steps == null || steps.isEmpty()) {
+            return PlanEvaluationResult.ok();
+        }
+
+        // 单步骤：直接执行
+        if (steps.size() == 1) {
+            return PlanEvaluationResult.ok();
+        }
+
+        // 检查是否是需要文件输出的任务
+        boolean needsFile = intentResolution != null && IntentResolutionHelper.needsFile(intentResolution);
+        if (needsFile) {
+            return PlanEvaluationResult.ok();
+        }
+
+        // 检查最后一步是否已经是整合类步骤
+        String lastDescription = steps.get(steps.size() - 1).getDescription().toLowerCase();
+        if (isIntegrationStep(lastDescription)) {
+            return PlanEvaluationResult.ok();
+        }
+
+        // 检查是否有多个信息收集类步骤
+        long collectionSteps = countCollectionSteps(steps);
+        if (collectionSteps >= 2) {
+            String suggestion = ResponseLanguageHelper.choose(
+                    objective,
+                    "建议在 plan 末尾添加整合步骤，将收集的信息整合成最终交付物。",
+                    "Consider adding a final integration step to compose the collected information into the deliverable."
+            );
+            return PlanEvaluationResult.needsRevision(suggestion, List.of("缺少最终整合步骤"));
+        }
+
+        return PlanEvaluationResult.ok();
+    }
+
+    private boolean isIntegrationStep(String description) {
+        String[] keywords = {"整合", "合成", "综合", "整理", "编排",
+                "integrate", "synthesize", "compose", "compile", "summarize", "organize"};
+        for (String keyword : keywords) {
+            if (description.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private long countCollectionSteps(List<WorkflowStep> steps) {
+        String[] collectionKeywords = {"搜索", "查询", "获取", "查找", "收集",
+                "search", "find", "get", "query", "retrieve", "collect"};
+        return steps.stream()
+                .filter(step -> {
+                    String desc = step.getDescription().toLowerCase();
+                    for (String keyword : collectionKeywords) {
+                        if (desc.contains(keyword)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+                .count();
     }
 
     private void appendParameterContextPrompt(StringBuilder prompt, WorkflowStep step) {

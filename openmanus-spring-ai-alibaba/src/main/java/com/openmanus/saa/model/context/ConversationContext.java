@@ -1,9 +1,11 @@
 package com.openmanus.saa.model.context;
 
+import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.session.ConversationMessage;
 import com.openmanus.saa.model.session.Session;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 统一对话上下文对象，在入口处一次性构建，贯穿整个执行流程。
@@ -20,28 +22,46 @@ public record ConversationContext(
     // 用户偏好（从 workingMemory 提取）
     Map<String, Object> userPreferences,
 
-    // 工作流状态
-    WorkflowState workflowState,
+    // 中断状态
+    boolean hasInterruptedWorkflow,
+    Optional<HumanFeedbackRequest> pendingFeedback,
 
     // 当前请求
     String currentPrompt
 ) {
     private static final String USER_PREFERENCES_KEY = "userPreferences";
-    private static final String WORKFLOW_STATE_KEY = "workflowState";
 
     /**
-     * 从 Session 构建 ConversationContext。
+     * 从 Session 构建 ConversationContext（无中断状态）。
      */
     public static ConversationContext from(Session session, String currentPrompt, String conversationHistory) {
         Map<String, Object> prefs = extractPreferences(session);
-        WorkflowState state = extractWorkflowState(session);
         return new ConversationContext(
             session.sessionId(),
             session,
             conversationHistory,
             session.messages(),
             prefs,
-            state,
+            false,
+            Optional.empty(),
+            currentPrompt
+        );
+    }
+
+    /**
+     * 从 Session 和中断状态构建 ConversationContext。
+     */
+    public static ConversationContext from(Session session, String currentPrompt, String conversationHistory,
+            boolean hasInterruptedWorkflow, Optional<HumanFeedbackRequest> pendingFeedback) {
+        Map<String, Object> prefs = extractPreferences(session);
+        return new ConversationContext(
+            session.sessionId(),
+            session,
+            conversationHistory,
+            session.messages(),
+            prefs,
+            hasInterruptedWorkflow,
+            pendingFeedback,
             currentPrompt
         );
     }
@@ -51,15 +71,11 @@ public record ConversationContext(
         return session.getMemory(USER_PREFERENCES_KEY, Map.class).orElse(Map.of());
     }
 
-    private static WorkflowState extractWorkflowState(Session session) {
-        return session.getMemory(WORKFLOW_STATE_KEY, WorkflowState.class).orElse(WorkflowState.none());
-    }
-
     /**
-     * 是否有暂停的工作流需要恢复。
+     * 是否有暂停的工作流需要恢复（兼容旧接口）。
      */
     public boolean hasPausedWorkflow() {
-        return workflowState != null && workflowState.isPaused();
+        return hasInterruptedWorkflow;
     }
 
     /**

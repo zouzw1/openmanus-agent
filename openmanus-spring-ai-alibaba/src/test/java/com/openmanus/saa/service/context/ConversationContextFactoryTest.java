@@ -2,6 +2,7 @@ package com.openmanus.saa.service.context;
 
 import com.openmanus.saa.model.context.ConversationContext;
 import com.openmanus.saa.model.session.Session;
+import com.openmanus.saa.service.WorkflowCheckpointService;
 import com.openmanus.saa.service.session.SessionMemoryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,18 +18,23 @@ class ConversationContextFactoryTest {
     @Mock
     private SessionMemoryService sessionMemoryService;
 
+    @Mock
+    private WorkflowCheckpointService checkpointService;
+
     @Test
     void create_shouldBuildContextWithHistory() {
         Session session = new Session("test-session");
         when(sessionMemoryService.getOrCreate("test-session")).thenReturn(session);
         when(sessionMemoryService.summarizeHistory(any(), anyInt())).thenReturn("previous conversation");
+        when(checkpointService.isInterrupted("test-session")).thenReturn(false);
 
-        ConversationContextFactory factory = new ConversationContextFactory(sessionMemoryService);
+        ConversationContextFactory factory = new ConversationContextFactory(sessionMemoryService, checkpointService);
         ConversationContext ctx = factory.create("test-session", "what's the weather?");
 
         assertEquals("test-session", ctx.sessionId());
         assertEquals("what's the weather?", ctx.currentPrompt());
         assertEquals("previous conversation", ctx.conversationHistory());
+        assertFalse(ctx.hasPausedWorkflow());
     }
 
     @Test
@@ -36,8 +42,9 @@ class ConversationContextFactoryTest {
         Session session = new Session("test-session");
         when(sessionMemoryService.getOrCreate("test-session")).thenReturn(session);
         when(sessionMemoryService.summarizeHistory(any(), eq(5))).thenReturn("short history");
+        when(checkpointService.isInterrupted("test-session")).thenReturn(false);
 
-        ConversationContextFactory factory = new ConversationContextFactory(sessionMemoryService);
+        ConversationContextFactory factory = new ConversationContextFactory(sessionMemoryService, checkpointService);
         ConversationContext ctx = factory.create("test-session", "prompt", 5);
 
         assertEquals("short history", ctx.conversationHistory());

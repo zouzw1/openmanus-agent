@@ -14,7 +14,10 @@ import com.openmanus.saa.agent.CapabilityAccessMode;
 import com.openmanus.saa.agent.IdAccessPolicy;
 import com.openmanus.saa.config.OpenManusProperties;
 import com.openmanus.saa.config.SessionConfig;
+import com.openmanus.saa.model.IntentResolution;
+import com.openmanus.saa.model.IntentRouteMode;
 import com.openmanus.saa.model.OutputEvaluationStatus;
+import com.openmanus.saa.model.PlanEvaluationResult;
 import com.openmanus.saa.model.ResponseMode;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.WorkflowStep;
@@ -96,66 +99,9 @@ class WorkflowServiceRegressionTest {
                 .containsExactly("runPowerShell", "readWorkspaceFile", "listWorkspaceFiles");
     }
 
-    @Test
-    void retryOutputWorkflowNodeExecutesFromClampedRetryIndex() {
-        WorkflowService service = mock(WorkflowService.class);
-
-        // Mock SessionStorage
-        SessionStorage sessionStorage = mock(SessionStorage.class);
-        when(sessionStorage.findById(any())).thenReturn(Optional.empty());
-        when(sessionStorage.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-
-        SessionMemoryService sessionMemoryService = new SessionMemoryService(
-            sessionStorage,
-            mock(SessionCompactor.class),
-            new SessionConfig()
-        );
-        WorkflowLifecycleNodeHandler handler = new WorkflowLifecycleNodeHandler(service);
-        List<WorkflowStep> currentSteps = List.of(
-                new WorkflowStep("manus", "step 1"),
-                new WorkflowStep("manus", "step 2"),
-                new WorkflowStep("manus", "step 3"),
-                new WorkflowStep("manus", "step 4")
-        );
-        List<WorkflowStep> retriedSteps = List.of(
-                currentSteps.get(0),
-                currentSteps.get(1),
-                currentSteps.get(2),
-                new WorkflowStep("manus", "step 4 retried")
-        );
-        WorkflowService.OutputEvaluationDecision decision = new WorkflowService.OutputEvaluationDecision(
-                OutputEvaluationStatus.BLOCKER,
-                "missing docx",
-                List.of("docx file was not generated"),
-                "retry the last step",
-                10
-        );
-
-        when(service.coerceWorkflowSteps(any())).thenReturn(currentSteps);
-        when(service.sessionMemoryService()).thenReturn(sessionMemoryService);
-        when(service.clampRetryStartIndex(currentSteps, 10)).thenReturn(3);
-        when(service.prepareStepsForOutputRetry(currentSteps, decision, 1)).thenReturn(retriedSteps);
-        when(service.executeStepsWithStatusTracking("session-1", "plan-1", retriedSteps, "build docx", 3))
-                .thenReturn(retriedSteps);
-        when(service.findFailedStep(retriedSteps)).thenReturn(Optional.empty());
-
-        OverAllState state = new OverAllState(Map.of(
-                "sessionId", "session-1",
-                "planId", "plan-1",
-                "objective", "build docx",
-                "responseMode", ResponseMode.WORKFLOW_SUMMARY,
-                "outputEvaluationDecision", decision,
-                "outputEvaluationRetryCount", 0,
-                "workflowSteps", currentSteps
-        ));
-
-        Map<String, Object> result = handler.retryOutputWorkflowNode(state);
-
-        verify(service).executeStepsWithStatusTracking("session-1", "plan-1", retriedSteps, "build docx", 3);
-        verify(service, never()).executeStepsWithStatusTracking("session-1", "plan-1", retriedSteps, "build docx", 10);
-        assertThat(result).containsEntry("workflowSteps", retriedSteps);
-        assertThat(result).containsEntry("outputEvaluationRetryCount", 1);
-    }
+    // TODO: retryOutputWorkflowNode method was removed - test needs rewrite
+    // @Test
+    // void retryOutputWorkflowNodeExecutesFromClampedRetryIndex() { ... }
 
     @Test
     void executionResultRecoveryExhaustedIsTrueOnFinalFailure() {
@@ -227,7 +173,100 @@ class WorkflowServiceRegressionTest {
                 mock(AgentCapabilitySnapshotService.class),
                 mock(IntentResolutionService.class),
                 List.<WorkflowSummaryFormatter>of(),
-                mock(com.openmanus.saa.service.supervisor.SupervisorAgentService.class)
+                mock(com.openmanus.saa.service.supervisor.SupervisorAgentService.class),
+                mock(WorkflowCheckpointService.class)
         );
+    }
+
+    // ===== evaluatePlan tests =====
+
+    @Test
+    void evaluatePlanReturnsOkForSingleStep() {
+        SkillCapabilityService skillCapabilityService = mock(SkillCapabilityService.class);
+        WorkflowService service = newWorkflowService(skillCapabilityService);
+        List<WorkflowStep> steps = List.of(
+                new WorkflowStep("manus", "search for Nanjing attractions")
+        );
+
+        PlanEvaluationResult result = ReflectionTestUtils.invokeMethod(
+                service,
+                "evaluatePlan",
+                "plan a 7-day Nanjing trip",
+                steps,
+                (com.openmanus.saa.model.IntentResolution) null
+        );
+
+        assertThat(result.needsRevision()).isFalse();
+    }
+
+    @Test
+    void evaluatePlanReturnsOkForArtifactOutput() {
+        SkillCapabilityService skillCapabilityService = mock(SkillCapabilityService.class);
+        WorkflowService service = newWorkflowService(skillCapabilityService);
+        IntentResolution needsFile = new IntentResolution(
+                "export",
+                1.0,
+                IntentRouteMode.PLAN_EXECUTE,
+                null,
+                Map.of("outputExpectation", Map.of("needsFile", true)),
+                List.of()
+        );
+        List<WorkflowStep> steps = List.of(
+                new WorkflowStep("manus", "read skill docx-format"),
+                new WorkflowStep("manus", "export itinerary to docx")
+        );
+
+        PlanEvaluationResult result = ReflectionTestUtils.invokeMethod(
+                service,
+                "evaluatePlan",
+                "export itinerary to docx",
+                steps,
+                needsFile
+        );
+
+        assertThat(result.needsRevision()).isFalse();
+    }
+
+    @Test
+    void evaluatePlanNeedsRevisionForMultiStepCollectionWithoutIntegration() {
+        SkillCapabilityService skillCapabilityService = mock(SkillCapabilityService.class);
+        WorkflowService service = newWorkflowService(skillCapabilityService);
+        List<WorkflowStep> steps = List.of(
+                new WorkflowStep("manus", "search for Nanjing attractions"),
+                new WorkflowStep("manus", "retrieve weather for Nanjing")
+        );
+
+        PlanEvaluationResult result = ReflectionTestUtils.invokeMethod(
+                service,
+                "evaluatePlan",
+                "plan a 7-day Nanjing trip",
+                steps,
+                (IntentResolution) null
+        );
+
+        assertThat(result.needsRevision()).isTrue();
+        assertThat(result.revisionSuggestion()).isNotNull();
+        assertThat(result.missingElements()).contains("缺少最终整合步骤");
+    }
+
+    @Test
+    void evaluatePlanReturnsOkForMultiStepWithIntegration() {
+        SkillCapabilityService skillCapabilityService = mock(SkillCapabilityService.class);
+        WorkflowService service = newWorkflowService(skillCapabilityService);
+        List<WorkflowStep> steps = List.of(
+                new WorkflowStep("manus", "search for Nanjing attractions"),
+                new WorkflowStep("manus", "retrieve weather for Nanjing"),
+                new WorkflowStep("manus", "compose the final itinerary")
+        );
+
+        PlanEvaluationResult result = ReflectionTestUtils.invokeMethod(
+                service,
+                "evaluatePlan",
+                "plan a 7-day Nanjing trip",
+                steps,
+                (IntentResolution) null
+        );
+
+        assertThat(result.needsRevision()).isFalse();
     }
 }

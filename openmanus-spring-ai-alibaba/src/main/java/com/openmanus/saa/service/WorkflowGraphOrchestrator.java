@@ -1,366 +1,281 @@
 package com.openmanus.saa.service;
 
 import com.alibaba.cloud.ai.graph.CompiledGraph;
+import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.StateGraph;
+import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
 import com.alibaba.cloud.ai.graph.exception.GraphStateException;
+import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
 import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.ResponseMode;
 import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowStep;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import com.openmanus.saa.service.WorkflowCheckpointService;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * 统一工作流图编排器。
+ *
+ * <p>使用单一状态图替代之前的多个独立图，通过框架原生的中断机制实现暂停/继续。
+ *
+ * <p>图结构：
+ * <pre>
+ * START → plan → evaluatePlan → executeStep ──┬──→ finalizeOutput
+ *                              │               │          │
+ *                              │               │          ▼
+ *                              │               │   evaluateOutput
+ *                              │               │          │
+ *                              │               │    ┌─────┴─────┐
+ *                              │               │    │           │
+ *                              └───────────────┴──►│    END     │
+ *                                                 │ retryStep  │
+ *                                                 └────────────┘
+ *
+ * RESUME (通过 RunnableConfig.resume() 触发)
+ *     │
+ *     ▼
+ * resolveFeedback ────────────────────────────────────►
+ *     │
+ *     ├─ continue → executeStep (跳过已完成步骤)
+ *     ├─ skip → executeStep (标记当前为 SKIPPED)
+ *     ├─ replan → plan
+ *     └─ abort → END
+ * </pre>
+ *
+ * <p>中断机制：
+ * <ul>
+ *   <li>通过 CompileConfig.interruptsAfter("executeStep") 在步骤执行后中断</li>
+ *   <li>节点内部检测 needsHumanFeedback 时，将 pendingFeedback 写入状态</li>
+ *   <li>恢复时通过 RunnableConfig.resume() + updateState() 注入反馈数据</li>
+ * </ul>
+ */
 final class WorkflowGraphOrchestrator {
 
-    private static final String RESPONSE_KEY = "workflowResponse";
-    private static final String PENDING_FEEDBACK_KEY = "pendingFeedback";
-    private static final String INTENT_RESOLUTION_KEY = "intentResolution";
-    private static final String PLAN_ID_KEY = "planId";
-    private static final String WORKFLOW_STEPS_KEY = "workflowSteps";
-    private static final String FAILED_STEP_KEY = "failedStep";
-    private static final String RESPONSE_MODE_KEY = "responseMode";
-    private static final String START_INDEX_KEY = "startIndex";
-    private static final String OUTPUT_EVALUATION_RETRY_COUNT_KEY = "outputEvaluationRetryCount";
-    private static final String CURRENT_STEP_INDEX_KEY = "currentStepIndex";
-    private static final String EXECUTED_STEP_COUNT_KEY = "executedStepCount";
-    private static final String LOOP_CONTINUE_KEY = "loopContinue";
+    private static final Logger log = org.slf4j.LoggerFactory.getLogger(WorkflowGraphOrchestrator.class);
 
     private final WorkflowService delegate;
-    private volatile CompiledGraph executionEntryGraph;
-    private volatile CompiledGraph feedbackEntryGraph;
-    private volatile CompiledGraph newPlanGraph;
-    private volatile CompiledGraph continueExecutionGraph;
-    private volatile CompiledGraph outputEvaluationGraph;
-    private volatile CompiledGraph stepExecutionGraph;
+    private final WorkflowCheckpointService checkpointService;
+    private final CompiledGraph unifiedGraph;
 
-    WorkflowGraphOrchestrator(WorkflowService delegate) {
+    WorkflowGraphOrchestrator(WorkflowService delegate, WorkflowCheckpointService checkpointService) {
         this.delegate = delegate;
+        this.checkpointService = checkpointService;
+        this.unifiedGraph = buildUnifiedGraph();
+        log.info("UnifiedWorkflowGraph compiled successfully");
     }
 
-    WorkflowExecutionResponse invokeExecutionEntryGraph(String sessionId, String objective, IntentResolution providedIntentResolution) {
+    /**
+     * 构建统一的工作流状态图。
+     */
+    private CompiledGraph buildUnifiedGraph() {
+        try {
+            StateGraph graph = new StateGraph();
+
+            // ========== 节点定义 ==========
+
+            // 规划节点
+            graph.addNode("plan", state -> CompletableFuture.completedFuture(delegate.planNode(state)));
+
+            // 计划评估节点
+            graph.addNode("evaluatePlan", state -> CompletableFuture.completedFuture(delegate.evaluatePlanNode(state)));
+
+            // 步骤执行节点（支持中断）
+            graph.addNode("executeStep", state -> CompletableFuture.completedFuture(delegate.executeStepNode(state)));
+
+            // 输出汇总节点
+            graph.addNode("finalizeOutput", state -> CompletableFuture.completedFuture(delegate.finalizeOutputNode(state)));
+
+            // 输出评估节点
+            graph.addNode("evaluateOutput", state -> CompletableFuture.completedFuture(delegate.evaluateOutputNode(state)));
+
+            // 重试步骤节点
+            graph.addNode("retryStep", state -> CompletableFuture.completedFuture(delegate.retryStepNode(state)));
+
+            // 反馈处理节点（RESUME 入口）
+            graph.addNode("resolveFeedback", state -> CompletableFuture.completedFuture(delegate.resolveFeedbackNode(state)));
+
+            // 终止节点
+            graph.addNode("abortWorkflow", state -> CompletableFuture.completedFuture(delegate.abortWorkflowNode(state)));
+
+            // 等待反馈节点（中断点）
+            graph.addNode("waitForFeedback", state -> CompletableFuture.completedFuture(Map.of()));
+
+            // 返回响应节点
+            graph.addNode("returnResponse", state -> CompletableFuture.completedFuture(delegate.returnResponseNode(state)));
+
+            // ========== 边定义 ==========
+
+            // START -> plan
+            graph.addEdge(StateGraph.START, "plan");
+
+            // plan -> evaluatePlan / returnResponse (如果规划失败)
+            graph.addConditionalEdges(
+                    "plan",
+                    state -> CompletableFuture.completedFuture(delegate.selectPlanTransition(state)),
+                    Map.of(
+                            "evaluate", "evaluatePlan",
+                            "return", "returnResponse"
+                    )
+            );
+
+            // evaluatePlan -> executeStep / finalizeOutput (如果快速路径) / waitForFeedback (需要修订plan)
+            graph.addConditionalEdges(
+                    "evaluatePlan",
+                    state -> CompletableFuture.completedFuture(delegate.selectEvaluatePlanTransition(state)),
+                    Map.of(
+                            "execute", "executeStep",
+                            "finalize", "finalizeOutput",
+                            "planRevision", "waitForFeedback"
+                    )
+            );
+
+            // executeStep -> executeStep (循环) / finalizeOutput / waitForFeedback (需要人工反馈时中断)
+            graph.addConditionalEdges(
+                    "executeStep",
+                    state -> CompletableFuture.completedFuture(delegate.selectExecuteStepTransition(state)),
+                    Map.of(
+                            "loop", "executeStep",
+                            "finalize", "finalizeOutput",
+                            "interrupt", "waitForFeedback"
+                    )
+            );
+
+            // finalizeOutput -> evaluateOutput
+            graph.addEdge("finalizeOutput", "evaluateOutput");
+
+            // evaluateOutput -> END / retryStep
+            graph.addConditionalEdges(
+                    "evaluateOutput",
+                    state -> CompletableFuture.completedFuture(delegate.selectOutputEvaluationTransition(state)),
+                    Map.of(
+                            "complete", StateGraph.END,
+                            "retry", "retryStep"
+                    )
+            );
+
+            // retryStep -> executeStep
+            graph.addEdge("retryStep", "executeStep");
+
+            // resolveFeedback -> executeStep / plan / abortWorkflow
+            graph.addConditionalEdges(
+                    "resolveFeedback",
+                    state -> CompletableFuture.completedFuture(delegate.selectFeedbackTransition(state)),
+                    Map.of(
+                            "execute", "executeStep",
+                            "replan", "plan",
+                            "abort", "abortWorkflow"
+                    )
+            );
+
+            // abortWorkflow -> END
+            graph.addEdge("abortWorkflow", StateGraph.END);
+
+            // waitForFeedback -> resolveFeedback (恢复时从此节点继续)
+            graph.addEdge("waitForFeedback", "resolveFeedback");
+
+            // returnResponse -> END
+            graph.addEdge("returnResponse", StateGraph.END);
+
+            // ========== 编译配置 ==========
+            // 注意：不使用 interruptsAfter，改用条件边控制流程
+            // 当需要人工反馈时，selectExecuteStepTransition 会路由到 "interrupt"
+            CompileConfig compileConfig = CompileConfig.builder()
+                    .saverConfig(SaverConfig.builder()
+                            .register(checkpointService.getCheckpointSaver())
+                            .build())
+                    .interruptsAfter(Set.of("waitForFeedback"))  // 只在等待反馈节点后中断
+                    .build();
+
+            return graph.compile(compileConfig);
+
+        } catch (GraphStateException ex) {
+            throw new IllegalStateException("Failed to build unified workflow graph", ex);
+        }
+    }
+
+    /**
+     * 执行新的工作流。
+     */
+    WorkflowExecutionResponse invoke(String sessionId, String objective, IntentResolution providedIntentResolution) {
         try {
             Map<String, Object> input = new LinkedHashMap<>();
             input.put("sessionId", sessionId);
             input.put("objective", objective);
             if (providedIntentResolution != null) {
-                input.put(INTENT_RESOLUTION_KEY, providedIntentResolution);
+                input.put(WorkflowCheckpointService.INTENT_RESOLUTION_KEY, providedIntentResolution);
             }
-            Optional<OverAllState> state = getOrCreateExecutionEntryGraph().invoke(input);
-            return extractResponse(state, "Execution graph did not produce a workflow response");
+
+            RunnableConfig config = checkpointService.createConfig(sessionId);
+            Optional<OverAllState> state = unifiedGraph.invoke(input, config);
+            return extractResponse(sessionId, state, "Workflow execution did not produce a response");
         } catch (Exception ex) {
-            throw new IllegalStateException("Workflow execution graph failed", ex);
+            throw new IllegalStateException("Workflow execution failed", ex);
         }
     }
 
-    WorkflowExecutionResponse invokeFeedbackEntryGraph(String sessionId, HumanFeedbackResponse feedback) {
+    /**
+     * 从中断点恢复执行。
+     */
+    WorkflowExecutionResponse resume(String sessionId, HumanFeedbackResponse feedback) {
         try {
-            Optional<OverAllState> state = getOrCreateFeedbackEntryGraph().invoke(Map.of(
-                    "sessionId", sessionId,
-                    "feedback", feedback
-            ));
-            return extractResponse(state, "Feedback graph did not produce a workflow response");
+            // 获取待处理反馈
+            HumanFeedbackRequest pendingFeedback = checkpointService.getPendingFeedback(sessionId)
+                    .orElseThrow(() -> new IllegalStateException("No pending feedback found for session: " + sessionId));
+
+            // 注入反馈到状态
+            checkpointService.injectFeedback(sessionId, feedback, pendingFeedback);
+
+            // 创建恢复配置
+            RunnableConfig resumeConfig = checkpointService.createResumeConfig(sessionId);
+
+            // 恢复执行
+            Optional<OverAllState> state = unifiedGraph.invoke(Map.of(), resumeConfig);
+            return extractResponse(sessionId, state, "Workflow resume did not produce a response");
         } catch (Exception ex) {
-            throw new IllegalStateException("Workflow feedback graph failed", ex);
+            throw new IllegalStateException("Workflow resume failed", ex);
         }
     }
 
-    WorkflowExecutionResponse invokeNewPlanGraph(String sessionId, String objective, IntentResolution intentResolution) {
-        try {
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("sessionId", sessionId);
-            input.put("objective", objective);
-            if (intentResolution != null) {
-                input.put(INTENT_RESOLUTION_KEY, intentResolution);
-            }
-            Optional<OverAllState> state = getOrCreateNewPlanGraph().invoke(input);
-            return extractResponse(state, "New-plan graph did not produce a workflow response");
-        } catch (Exception ex) {
-            throw new IllegalStateException("Workflow new-plan graph failed", ex);
+    /**
+     * 检查是否有中断的工作流。
+     */
+    boolean isInterrupted(String sessionId) {
+        return checkpointService.isInterrupted(sessionId);
+    }
+
+    /**
+     * 获取待处理反馈。
+     */
+    Optional<HumanFeedbackRequest> getPendingFeedback(String sessionId) {
+        return checkpointService.getPendingFeedback(sessionId);
+    }
+
+    /**
+     * 从状态中提取响应。优先从返回的状态中获取，若因中断而未包含响应，则从检查点中获取。
+     */
+    private WorkflowExecutionResponse extractResponse(String sessionId, Optional<OverAllState> state, String errorMessage) {
+        // 1. 优先从返回的状态中获取（正常完成或执行失败的情况）
+        Optional<Object> responseFromState = state.flatMap(s -> s.value(WorkflowCheckpointService.WORKFLOW_RESPONSE_KEY, Object.class));
+        if (responseFromState.isPresent()) {
+            return delegate.coerceWorkflowExecutionResponse(responseFromState.get());
         }
-    }
 
-    WorkflowExecutionResponse invokeContinueExecutionGraph(
-            String sessionId,
-            String objective,
-            String planId,
-            List<WorkflowStep> workflowSteps,
-            int fromIndex,
-            ResponseMode responseMode
-    ) {
-        try {
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("sessionId", sessionId);
-            input.put("objective", objective);
-            input.put(PLAN_ID_KEY, planId);
-            input.put(WORKFLOW_STEPS_KEY, workflowSteps);
-            input.put(START_INDEX_KEY, fromIndex);
-            input.put(RESPONSE_MODE_KEY, responseMode);
-            Optional<OverAllState> state = getOrCreateContinueExecutionGraph().invoke(input);
-            return extractResponse(state, "Continue graph did not produce a workflow response");
-        } catch (Exception ex) {
-            throw new IllegalStateException("Workflow continue graph failed", ex);
+        // 2. 中断情况下，响应保存在检查点中（框架在 executeStep 后中断，未到达 finalizeOutput）
+        Optional<Object> responseFromCheckpoint = checkpointService.getState(sessionId)
+                .map(stateMap -> stateMap.get(WorkflowCheckpointService.WORKFLOW_RESPONSE_KEY))
+                .filter(Objects::nonNull);
+        if (responseFromCheckpoint.isPresent()) {
+            return delegate.coerceWorkflowExecutionResponse(responseFromCheckpoint.get());
         }
-    }
 
-    WorkflowExecutionResponse invokeOutputEvaluationGraph(
-            String sessionId,
-            String planId,
-            String objective,
-            List<WorkflowStep> executedSteps,
-            ResponseMode responseMode
-    ) {
-        try {
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("sessionId", sessionId);
-            input.put(PLAN_ID_KEY, planId);
-            input.put("objective", objective);
-            input.put(WORKFLOW_STEPS_KEY, executedSteps == null ? List.of() : executedSteps);
-            input.put(RESPONSE_MODE_KEY, responseMode);
-            Optional<OverAllState> state = getOrCreateOutputEvaluationGraph().invoke(input);
-            return extractResponse(state, "Output-evaluation graph did not produce a workflow response");
-        } catch (Exception ex) {
-            throw new IllegalStateException("Workflow output-evaluation graph failed", ex);
-        }
-    }
-
-    List<WorkflowStep> invokeStepExecutionGraph(
-            String sessionId,
-            String planId,
-            List<WorkflowStep> workflowSteps,
-            String objective,
-            int startIndexOffset
-    ) {
-        try {
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("sessionId", sessionId);
-            input.put(PLAN_ID_KEY, planId);
-            input.put("objective", objective);
-            input.put(WORKFLOW_STEPS_KEY, delegate.copyWorkflowSteps(workflowSteps));
-            input.put(CURRENT_STEP_INDEX_KEY, Math.max(0, startIndexOffset));
-            input.put(EXECUTED_STEP_COUNT_KEY, 0);
-            input.put(LOOP_CONTINUE_KEY, true);
-            Optional<OverAllState> state = getOrCreateStepExecutionGraph().invoke(input);
-            List<WorkflowStep> updatedSteps = state.flatMap(value -> value.value(WORKFLOW_STEPS_KEY, Object.class))
-                    .map(delegate::coerceWorkflowSteps)
-                    .orElseThrow(() -> new IllegalStateException("Step-execution graph did not return workflow steps"));
-            return updatedSteps;
-        } catch (Exception ex) {
-            throw new IllegalStateException("Workflow step-execution graph failed", ex);
-        }
-    }
-
-    private WorkflowExecutionResponse extractResponse(Optional<OverAllState> state, String errorMessage) {
-        return state.flatMap(value -> value.value(RESPONSE_KEY, Object.class))
-                .map(delegate::coerceWorkflowExecutionResponse)
-                .orElseThrow(() -> new IllegalStateException(errorMessage));
-    }
-
-    private CompiledGraph getOrCreateExecutionEntryGraph() {
-        return buildExecutionEntryGraph();
-    }
-
-    private CompiledGraph getOrCreateFeedbackEntryGraph() {
-        return buildFeedbackEntryGraph();
-    }
-
-    private CompiledGraph getOrCreateNewPlanGraph() {
-        return buildNewPlanGraph();
-    }
-
-    private CompiledGraph getOrCreateContinueExecutionGraph() {
-        return buildContinueExecutionGraph();
-    }
-
-    private CompiledGraph getOrCreateOutputEvaluationGraph() {
-        return buildOutputEvaluationGraph();
-    }
-
-    private CompiledGraph getOrCreateStepExecutionGraph() {
-        return buildStepExecutionGraph();
-    }
-
-    private CompiledGraph buildExecutionEntryGraph() {
-        try {
-            StateGraph graph = new StateGraph();
-            graph.addNode("checkPendingFeedback", state -> CompletableFuture.completedFuture(delegate.checkPendingFeedbackNode(state)));
-            graph.addNode("resolveAndExecute", state -> CompletableFuture.completedFuture(delegate.resolveAndExecuteNode(state)));
-            graph.addNode("returnPaused", state -> CompletableFuture.completedFuture(delegate.returnPausedNode(state)));
-            graph.addEdge(StateGraph.START, "checkPendingFeedback");
-            graph.addConditionalEdges(
-                    "checkPendingFeedback",
-                    state -> CompletableFuture.completedFuture(
-                            state.value(PENDING_FEEDBACK_KEY, Object.class).isPresent() ? "returnPaused" : "resolveAndExecute"
-                    ),
-                    Map.of(
-                            "returnPaused", "returnPaused",
-                            "resolveAndExecute", "resolveAndExecute"
-                    )
-            );
-            graph.addEdge("returnPaused", StateGraph.END);
-            graph.addEdge("resolveAndExecute", StateGraph.END);
-            return graph.compile();
-        } catch (GraphStateException ex) {
-            throw new IllegalStateException("Failed to build workflow execution graph", ex);
-        }
-    }
-
-    private CompiledGraph buildFeedbackEntryGraph() {
-        try {
-            StateGraph graph = new StateGraph();
-            graph.addNode("loadPendingFeedback", state -> CompletableFuture.completedFuture(delegate.loadPendingFeedbackNode(state)));
-            graph.addNode("replanFromFeedback", state -> CompletableFuture.completedFuture(delegate.replanFromFeedbackNode(state)));
-            graph.addNode("abortFromFeedback", state -> CompletableFuture.completedFuture(delegate.abortFromFeedbackNode(state)));
-            graph.addNode("skipFromFeedback", state -> CompletableFuture.completedFuture(delegate.skipFromFeedbackNode(state)));
-            graph.addNode("continueFromFeedback", state -> CompletableFuture.completedFuture(delegate.continueFromFeedbackNode(state)));
-            graph.addEdge(StateGraph.START, "loadPendingFeedback");
-            graph.addConditionalEdges(
-                    "loadPendingFeedback",
-                    state -> CompletableFuture.completedFuture(delegate.selectFeedbackTransition(state)),
-                    Map.of(
-                            "replan", "replanFromFeedback",
-                            "abort", "abortFromFeedback",
-                            "skip", "skipFromFeedback",
-                            "continue", "continueFromFeedback"
-                    )
-            );
-            graph.addEdge("replanFromFeedback", StateGraph.END);
-            graph.addEdge("abortFromFeedback", StateGraph.END);
-            graph.addEdge("skipFromFeedback", StateGraph.END);
-            graph.addEdge("continueFromFeedback", StateGraph.END);
-            return graph.compile();
-        } catch (GraphStateException ex) {
-            throw new IllegalStateException("Failed to build workflow feedback graph", ex);
-        }
-    }
-
-    private CompiledGraph buildNewPlanGraph() {
-        try {
-            StateGraph graph = new StateGraph();
-            graph.addNode("createPlanContext", state -> CompletableFuture.completedFuture(delegate.createPlanContextNode(state)));
-            graph.addNode("executePlannedSteps", state -> CompletableFuture.completedFuture(delegate.executePlannedStepsNode(state)));
-            graph.addNode("returnResponse", state -> CompletableFuture.completedFuture(delegate.returnGraphResponseNode(state)));
-            graph.addNode("returnPausedAfterRun", state -> CompletableFuture.completedFuture(delegate.returnPausedAfterRunNode(state)));
-            graph.addNode("returnFailedAfterRun", state -> CompletableFuture.completedFuture(delegate.returnFailedAfterRunNode(state)));
-            graph.addNode("finalizeSuccessfulRun", state -> CompletableFuture.completedFuture(delegate.finalizeSuccessfulRunNode(state)));
-            graph.addEdge(StateGraph.START, "createPlanContext");
-            graph.addConditionalEdges(
-                    "createPlanContext",
-                    state -> CompletableFuture.completedFuture(delegate.hasGraphResponse(state) ? "returnResponse" : "executePlannedSteps"),
-                    Map.of(
-                            "returnResponse", "returnResponse",
-                            "executePlannedSteps", "executePlannedSteps"
-                    )
-            );
-            graph.addConditionalEdges(
-                    "executePlannedSteps",
-                    state -> CompletableFuture.completedFuture(delegate.selectPostExecutionTransition(state)),
-                    Map.of(
-                            "paused", "returnPausedAfterRun",
-                            "failed", "returnFailedAfterRun",
-                            "completed", "finalizeSuccessfulRun"
-                    )
-            );
-            graph.addEdge("returnResponse", StateGraph.END);
-            graph.addEdge("returnPausedAfterRun", StateGraph.END);
-            graph.addEdge("returnFailedAfterRun", StateGraph.END);
-            graph.addEdge("finalizeSuccessfulRun", StateGraph.END);
-            return graph.compile();
-        } catch (GraphStateException ex) {
-            throw new IllegalStateException("Failed to build workflow new-plan graph", ex);
-        }
-    }
-
-    private CompiledGraph buildContinueExecutionGraph() {
-        try {
-            StateGraph graph = new StateGraph();
-            graph.addNode("executeContinuationSteps", state -> CompletableFuture.completedFuture(delegate.executeContinuationStepsNode(state)));
-            graph.addNode("returnPausedAfterRun", state -> CompletableFuture.completedFuture(delegate.returnPausedAfterRunNode(state)));
-            graph.addNode("returnFailedAfterRun", state -> CompletableFuture.completedFuture(delegate.returnFailedAfterRunNode(state)));
-            graph.addNode("finalizeSuccessfulRun", state -> CompletableFuture.completedFuture(delegate.finalizeSuccessfulRunNode(state)));
-            graph.addEdge(StateGraph.START, "executeContinuationSteps");
-            graph.addConditionalEdges(
-                    "executeContinuationSteps",
-                    state -> CompletableFuture.completedFuture(delegate.selectPostExecutionTransition(state)),
-                    Map.of(
-                            "paused", "returnPausedAfterRun",
-                            "failed", "returnFailedAfterRun",
-                            "completed", "finalizeSuccessfulRun"
-                    )
-            );
-            graph.addEdge("returnPausedAfterRun", StateGraph.END);
-            graph.addEdge("returnFailedAfterRun", StateGraph.END);
-            graph.addEdge("finalizeSuccessfulRun", StateGraph.END);
-            return graph.compile();
-        } catch (GraphStateException ex) {
-            throw new IllegalStateException("Failed to build workflow continue graph", ex);
-        }
-    }
-
-    private CompiledGraph buildOutputEvaluationGraph() {
-        try {
-            StateGraph graph = new StateGraph();
-            graph.addNode("maybeSkipOutputEvaluation", state -> CompletableFuture.completedFuture(delegate.maybeSkipOutputEvaluationNode(state)));
-            graph.addNode("evaluateCurrentOutput", state -> CompletableFuture.completedFuture(delegate.evaluateCurrentOutputNode(state)));
-            graph.addNode("retryOutputWorkflow", state -> CompletableFuture.completedFuture(delegate.retryOutputWorkflowNode(state)));
-            graph.addNode("completeWithCurrentOutput", state -> CompletableFuture.completedFuture(delegate.completeWithCurrentOutputNode(state)));
-            graph.addNode("failFromOutputEvaluation", state -> CompletableFuture.completedFuture(delegate.failFromOutputEvaluationNode(state)));
-            graph.addNode("returnGraphResponse", state -> CompletableFuture.completedFuture(delegate.returnGraphResponseNode(state)));
-            graph.addEdge(StateGraph.START, "maybeSkipOutputEvaluation");
-            graph.addConditionalEdges(
-                    "maybeSkipOutputEvaluation",
-                    state -> CompletableFuture.completedFuture(delegate.hasGraphResponse(state) ? "return" : "evaluate"),
-                    Map.of(
-                            "return", "returnGraphResponse",
-                            "evaluate", "evaluateCurrentOutput"
-                    )
-            );
-            graph.addConditionalEdges(
-                    "evaluateCurrentOutput",
-                    state -> CompletableFuture.completedFuture(delegate.selectOutputEvaluationTransition(state)),
-                    Map.of(
-                            "retry", "retryOutputWorkflow",
-                            "complete", "completeWithCurrentOutput",
-                            "fail", "failFromOutputEvaluation"
-                    )
-            );
-            graph.addConditionalEdges(
-                    "retryOutputWorkflow",
-                    state -> CompletableFuture.completedFuture(delegate.hasGraphResponse(state) ? "return" : "evaluate"),
-                    Map.of(
-                            "return", "returnGraphResponse",
-                            "evaluate", "evaluateCurrentOutput"
-                    )
-            );
-            graph.addEdge("completeWithCurrentOutput", StateGraph.END);
-            graph.addEdge("failFromOutputEvaluation", StateGraph.END);
-            graph.addEdge("returnGraphResponse", StateGraph.END);
-            return graph.compile();
-        } catch (GraphStateException ex) {
-            throw new IllegalStateException("Failed to build workflow output-evaluation graph", ex);
-        }
-    }
-
-    private CompiledGraph buildStepExecutionGraph() {
-        try {
-            StateGraph graph = new StateGraph();
-            graph.addNode("executeSingleStep", state -> CompletableFuture.completedFuture(delegate.executeSingleStepNode(state)));
-            graph.addConditionalEdges(
-                    "executeSingleStep",
-                    state -> CompletableFuture.completedFuture(state.value(LOOP_CONTINUE_KEY, Boolean.FALSE) ? "loop" : "end"),
-                    Map.of(
-                            "loop", "executeSingleStep",
-                            "end", StateGraph.END
-                    )
-            );
-            graph.addEdge(StateGraph.START, "executeSingleStep");
-            return graph.compile();
-        } catch (GraphStateException ex) {
-            throw new IllegalStateException("Failed to build workflow step-execution graph", ex);
-        }
+        throw new IllegalStateException(errorMessage);
     }
 }
