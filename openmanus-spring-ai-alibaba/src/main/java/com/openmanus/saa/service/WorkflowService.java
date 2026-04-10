@@ -3410,7 +3410,8 @@ public class WorkflowService {
     ) {
         List<String> artifacts = collectResponseArtifacts(completedSteps);
         List<String> executionLog = toExecutionLog(completedSteps);
-        String deliverableSummary = summarizeDeliverable(objective, completedSteps, artifacts);
+        // 使用 generateDeliverable 而非 summarizeDeliverable，确保评估看到的内容和用户看到的一致
+        String deliverableSummary = generateDeliverable(objective, completedSteps, artifacts, responseMode);
         String workflowSummary = summarizeExecutionProgress(objective, completedSteps, artifacts, executionLog);
 
         String content = chatClient.prompt()
