@@ -1,6 +1,7 @@
 package com.openmanus.saa.service.supervisor;
 
 import com.openmanus.saa.model.AgentTask;
+import com.openmanus.saa.model.AgentType;
 
 /**
  * Lifecycle hook interface for agent events in multi-agent execution.
@@ -8,67 +9,31 @@ import com.openmanus.saa.model.AgentTask;
  */
 public interface AgentLifecycleHook {
 
-    /**
-     * Called when an agent peer is started.
-     *
-     * @param peer the agent peer that was started
-     */
-    default void onAgentStarted(AgentPeer peer) {
-    }
+    default void onAgentStarted(AgentPeer peer) {}
 
-    /**
-     * Called when an agent peer is stopped.
-     *
-     * @param peer the agent peer that was stopped
-     */
-    default void onAgentStopped(AgentPeer peer) {
-    }
+    default void onAgentStopped(AgentPeer peer) {}
 
-    /**
-     * Called when a task is started by an agent.
-     *
-     * @param peer the agent peer executing the task
-     * @param task the task being started
-     */
-    default void onTaskStarted(AgentPeer peer, AgentTask task) {
-    }
+    default void onTaskAssigned(AgentPeer peer, AgentTask task) {}
 
-    /**
-     * Called when a task is completed by an agent.
-     *
-     * @param peer the agent peer that completed the task
-     * @param task the completed task
-     * @param result the execution result
-     */
-    default void onTaskCompleted(AgentPeer peer, AgentTask task, TaskExecutionResult result) {
-    }
+    default void onTaskStarted(AgentPeer peer, AgentTask task) {}
 
-    /**
-     * Called when a message is received by an agent.
-     *
-     * @param peer the agent peer that received the message
-     * @param message the received message
-     */
-    default void onMessageReceived(AgentPeer peer, AgentMessage message) {
-    }
+    default void onTaskCompleted(AgentPeer peer, AgentTask task, TaskExecutionResult result) {}
 
-    /**
-     * Called when an error occurs during task execution.
-     *
-     * @param peer the agent peer where the error occurred
-     * @param task the task that caused the error (may be null)
-     * @param error the error that occurred
-     */
-    default void onError(AgentPeer peer, AgentTask task, Throwable error) {
-    }
+    default void onMessageReceived(AgentPeer peer, AgentMessage message) {}
 
-    /**
-     * Returns the order of this hook. Hooks with lower order values are executed first.
-     * Default order is 0.
-     *
-     * @return the order value
-     */
-    default int getOrder() {
-        return 0;
-    }
+    default void onError(AgentPeer peer, AgentTask task, Throwable error) {}
+
+    default void onContextSummarized(AgentPeer peer, int originalLength, int summaryLength, String summary) {}
+
+    default void onBackgroundTaskStarted(AgentPeer peer, String taskId, AgentType agentType) {}
+
+    default void onBackgroundTaskCompleted(AgentPeer peer, String taskId, TaskExecutionResult result) {}
+
+    default void onBackgroundTaskFailed(AgentPeer peer, String taskId, Throwable error, boolean cancelled) {}
+
+    default void onToolAccessDenied(AgentPeer peer, String toolName, String reason) {}
+
+    default void onIsolationActivated(AgentPeer peer, String isolationType, String isolatedPath) {}
+
+    default int getOrder() { return 0; }
 }

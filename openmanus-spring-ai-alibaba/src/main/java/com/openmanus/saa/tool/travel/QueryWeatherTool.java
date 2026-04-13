@@ -25,11 +25,12 @@ public class QueryWeatherTool {
      * @param city 城市名称
      * @return 当前天气信息的JSON字符串
      */
-    @Tool(description = "查询指定城市的当前天气状况。参数：city-城市名称(必填)")
+    @Tool(description = "查询指定城市的当前天气状况。参数：city-城市名称(必填)，countryCode-国家代码如CN/US(可选)")
     public String queryWeather(
-            @ToolParam(description = "城市名称，例如北京、上海") String city) {
+            @ToolParam(description = "城市名称，例如北京、上海") String city,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
-            GeoLocation location = apiClient.geocode(city);
+            GeoLocation location = apiClient.geocode(city, countryCode);
             WeatherInfo weather = apiClient.getCurrentWeather(location);
 
             StringBuilder sb = new StringBuilder();

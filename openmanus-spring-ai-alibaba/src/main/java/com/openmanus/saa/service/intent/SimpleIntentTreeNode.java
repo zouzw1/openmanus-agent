@@ -1,6 +1,6 @@
 package com.openmanus.saa.service.intent;
 
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.Session;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
@@ -9,14 +9,14 @@ import java.util.function.BiPredicate;
 public final class SimpleIntentTreeNode implements IntentTreeNode {
 
     private final String id;
-    private final BiPredicate<String, SessionState> matcher;
-    private final BiFunction<String, SessionState, IntentDecision> decisionFunction;
+    private final BiPredicate<String, Session> matcher;
+    private final BiFunction<String, Session, IntentDecision> decisionFunction;
     private final List<IntentTreeNode> children;
 
     private SimpleIntentTreeNode(
             String id,
-            BiPredicate<String, SessionState> matcher,
-            BiFunction<String, SessionState, IntentDecision> decisionFunction,
+            BiPredicate<String, Session> matcher,
+            BiFunction<String, Session, IntentDecision> decisionFunction,
             List<IntentTreeNode> children
     ) {
         this.id = id;
@@ -35,12 +35,12 @@ public final class SimpleIntentTreeNode implements IntentTreeNode {
     }
 
     @Override
-    public boolean matches(String prompt, SessionState session) {
+    public boolean matches(String prompt, Session session) {
         return matcher.test(prompt, session);
     }
 
     @Override
-    public IntentDecision decision(String prompt, SessionState session) {
+    public IntentDecision decision(String prompt, Session session) {
         IntentDecision decision = decisionFunction.apply(prompt, session);
         return decision == null ? IntentDecision.empty() : decision;
     }
@@ -52,8 +52,8 @@ public final class SimpleIntentTreeNode implements IntentTreeNode {
 
     public static final class Builder {
         private final String id;
-        private BiPredicate<String, SessionState> matcher = (prompt, session) -> true;
-        private BiFunction<String, SessionState, IntentDecision> decisionFunction = (prompt, session) -> IntentDecision.empty();
+        private BiPredicate<String, Session> matcher = (prompt, session) -> true;
+        private BiFunction<String, Session, IntentDecision> decisionFunction = (prompt, session) -> IntentDecision.empty();
         private final List<IntentTreeNode> children = new ArrayList<>();
 
         private Builder(String id) {
@@ -63,7 +63,7 @@ public final class SimpleIntentTreeNode implements IntentTreeNode {
             this.id = id.trim();
         }
 
-        public Builder matcher(BiPredicate<String, SessionState> matcher) {
+        public Builder matcher(BiPredicate<String, Session> matcher) {
             this.matcher = matcher == null ? (prompt, session) -> true : matcher;
             return this;
         }
@@ -72,7 +72,7 @@ public final class SimpleIntentTreeNode implements IntentTreeNode {
             return decision((prompt, session) -> decision);
         }
 
-        public Builder decision(BiFunction<String, SessionState, IntentDecision> decisionFunction) {
+        public Builder decision(BiFunction<String, Session, IntentDecision> decisionFunction) {
             this.decisionFunction = decisionFunction == null
                     ? (prompt, session) -> IntentDecision.empty()
                     : decisionFunction;

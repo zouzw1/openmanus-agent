@@ -9,17 +9,7 @@ prompt:
   file: prompts/manus.md
 capabilities:
   local-tools:
-    mode: allow_list
-    ids:
-      - tool:listWorkspaceFiles
-      - tool:readWorkspaceFile
-      - tool:writeWorkspaceFile
-      - tool:runPowerShell
-      - tool:createPlan
-      - tool:getPlan
-      - tool:browserAction
-      - tool:runSandboxCommand
-      - tool:callMcpTool
+    mode: allow_all
   mcp:
     mode: allow_list
     servers:

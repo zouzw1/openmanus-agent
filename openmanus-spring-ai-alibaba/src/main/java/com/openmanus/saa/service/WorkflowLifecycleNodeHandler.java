@@ -236,6 +236,10 @@ final class WorkflowLifecycleNodeHandler {
             // 返回特殊结果，框架会在 executeStep 后中断
             Map<String, Object> result = buildStepResult(updatedSteps, actualStepIndex, executedCount, false);
             result.put(WorkflowCheckpointService.FEEDBACK_WAIT_KEY, true);
+            result.put(WorkflowCheckpointService.PENDING_FEEDBACK_KEY, pendingFeedback);
+            // 同时设置 HITL 响应，以便 extractResponse 在中断时能找到
+            result.put(WorkflowCheckpointService.WORKFLOW_RESPONSE_KEY,
+                    service.createPausedResponse(objective, updatedSteps, pendingFeedback));
             return result;
         }
 
@@ -383,12 +387,16 @@ final class WorkflowLifecycleNodeHandler {
      * 反馈处理节点（RESUME 入口）。
      */
     Map<String, Object> resolveFeedbackNode(OverAllState state) {
-        String sessionId = state.value("sessionId", String.class).orElseThrow();
-        HumanFeedbackResponse feedback = state.value(WorkflowCheckpointService.FEEDBACK_RESPONSE_KEY, HumanFeedbackResponse.class)
+        HumanFeedbackResponse feedback = state.value(WorkflowCheckpointService.FEEDBACK_RESPONSE_KEY, Object.class)
+                .map(service::coerceHumanFeedbackResponse)
                 .orElseThrow();
         HumanFeedbackRequest pendingFeedback = state.value(WorkflowCheckpointService.PENDING_FEEDBACK_KEY, Object.class)
                 .map(service::coerceHumanFeedbackRequest)
                 .orElseThrow();
+
+        // sessionId 优先从 state 取，fallback 从 pendingFeedback 取（resume 后 state 中可能没有 sessionId）
+        String sessionId = state.value("sessionId", String.class)
+                .orElse(pendingFeedback.getSessionId());
 
         log.info("Resolving feedback for session {}, action={}", sessionId, feedback.getAction());
 
@@ -479,12 +487,12 @@ final class WorkflowLifecycleNodeHandler {
                 WorkflowCheckpointService.WORKFLOW_RESPONSE_KEY,
                 new WorkflowExecutionResponse(
                         pendingFeedback.getObjective(),
-                        null,
-                        content,
+                        allSteps,
                         service.collectResponseArtifacts(allSteps),
+                        List.of(content),  // executionLog: 终止说明
                         service.buildSummary(pendingFeedback.getObjective(), allSteps, WorkflowExecutionStatus.ABORTED,
                                 pendingFeedback.getFailedStep().getDescription(), null),
-                        allSteps,
+                        null,
                         null
                 )
         );

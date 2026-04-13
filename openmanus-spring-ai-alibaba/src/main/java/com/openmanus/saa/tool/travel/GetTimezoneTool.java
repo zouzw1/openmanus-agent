@@ -28,11 +28,12 @@ public class GetTimezoneTool {
      * @param city 城市名称
      * @return 时区信息的JSON字符串
      */
-    @Tool(description = "查询指定城市的时区和当前当地时间。参数：city-城市名称(必填)")
+    @Tool(description = "查询指定城市的时区和当前当地时间。参数：city-城市名称(必填)，countryCode-国家代码如CN/US(可选)")
     public String getTimezone(
-            @ToolParam(description = "城市名称，例如北京、纽约、伦敦") String city) {
+            @ToolParam(description = "城市名称，例如北京、纽约、伦敦") String city,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
-            GeoLocation location = apiClient.geocode(city);
+            GeoLocation location = apiClient.geocode(city, countryCode);
 
             // 使用经纬度估算时区
             ZoneId zoneId = estimateZoneId(location);

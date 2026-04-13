@@ -151,18 +151,13 @@ public class ToolPermissionContext {
         }
 
         Set<String> denied = Set.of();
-        Set<String> deniedPrefixes = Set.of();
 
-        if (policy.getMode() == com.openmanus.saa.agent.CapabilityAccessMode.DENY_LIST) {
-            denied = policy.getIds().stream()
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
-            deniedPrefixes = policy.getDenyPrefixes().stream()
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
+        if (policy.getMode() == com.openmanus.saa.agent.CapabilityAccessMode.DENY_ALL) {
+            // DENY_ALL means all tools are denied; we don't have individual deny IDs in this mode
+            denied = Set.of(); // The isDenied() check handles DENY_ALL
         }
 
-        return new ToolPermissionContext(denied, deniedPrefixes, Set.of());
+        return new ToolPermissionContext(denied, Set.of(), Set.of());
     }
 
     private static Set<String> toLowerSet(List<String> list) {

@@ -10,9 +10,20 @@ import com.openmanus.saa.config.SkillsProperties;
 import com.openmanus.saa.config.ModelProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
+import org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiChatAutoConfiguration;
+import org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiEmbeddingAutoConfiguration;
+import org.springframework.ai.model.zhipuai.autoconfigure.ZhiPuAiImageAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+        DataSourceAutoConfiguration.class,
+        DataSourceTransactionManagerAutoConfiguration.class,
+        ZhiPuAiChatAutoConfiguration.class,
+        ZhiPuAiEmbeddingAutoConfiguration.class,
+        ZhiPuAiImageAutoConfiguration.class
+})
 @EnableConfigurationProperties({
         AgentRegistryProperties.class,
         OpenManusProperties.class,

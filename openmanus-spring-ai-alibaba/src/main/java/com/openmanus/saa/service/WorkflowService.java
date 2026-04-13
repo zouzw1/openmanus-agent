@@ -201,11 +201,26 @@ public class WorkflowService {
     }
 
     public AgentResponse executeAsAgentResponse(String sessionId, String objective) {
-        return toAgentResponse(execute(sessionId, objective));
+        return executeAsAgentResponse(sessionId, objective, null);
     }
 
     public AgentResponse executeAsAgentResponse(String sessionId, String objective, IntentResolution intentResolution) {
-        return toAgentResponse(execute(sessionId, objective, intentResolution));
+        // 1. 保存用户消息到 session
+        Session session = sessionMemoryService.getOrCreate(sessionId);
+        sessionMemoryService.saveSession(session.addUserMessage(objective));
+
+        // 2. 执行工作流
+        WorkflowExecutionResponse response = execute(sessionId, objective, intentResolution);
+
+        // 3. 转换为 AgentResponse 并保存完整结果到 session
+        AgentResponse agentResponse = toAgentResponse(response);
+        String replyContent = !agentResponse.summary().isBlank()
+                ? agentResponse.summary()
+                : (!agentResponse.content().isBlank() ? agentResponse.content() : objective);
+        session = sessionMemoryService.getOrCreate(sessionId);
+        sessionMemoryService.saveSession(session.addAssistantMessage(replyContent));
+
+        return agentResponse;
     }
 
     public Optional<HumanFeedbackRequest> getPendingFeedback(String sessionId) {
@@ -217,7 +232,22 @@ public class WorkflowService {
     }
 
     public AgentResponse submitHumanFeedbackAsAgentResponse(String sessionId, HumanFeedbackResponse feedback) {
-        return toAgentResponse(submitHumanFeedback(sessionId, feedback));
+        AgentResponse agentResponse = toAgentResponse(submitHumanFeedback(sessionId, feedback));
+        // 保存恢复后的执行结果到 session
+        String replyContent = !agentResponse.summary().isBlank()
+                ? agentResponse.summary()
+                : (!agentResponse.content().isBlank() ? agentResponse.content() : agentResponse.objective());
+        Session session = sessionMemoryService.getOrCreate(sessionId);
+        sessionMemoryService.saveSession(session.addAssistantMessage(replyContent));
+        return agentResponse;
+    }
+
+    /**
+     * 保存用户消息到 session。
+     */
+    public void saveUserMessage(String sessionId, String userMessage) {
+        Session session = sessionMemoryService.getOrCreate(sessionId);
+        sessionMemoryService.saveSession(session.addUserMessage(userMessage));
     }
 
     SessionMemoryService sessionMemoryService() {
@@ -356,10 +386,8 @@ public class WorkflowService {
                 objective, executedSteps, responseMode, evalResult, intentResolution
         );
 
-        Session session = sessionMemoryService.getOrCreate(sessionId);
-        sessionMemoryService.saveSession(session.addAssistantMessage(response.content()));
-
         // 释放检查点（工作流已完成）
+        // 注意：session 消息由 executeAsAgentResponse 统一保存，此处不保存
         checkpointService.release(sessionId);
 
         return response;
@@ -1810,12 +1838,12 @@ public class WorkflowService {
     ) {
         return new WorkflowExecutionResponse(
                 objective,
-                null, // deliverable
-                null, // content
-                List.of(), // artifacts
-                null, // summary
-                steps,
-                pendingFeedback
+                steps,          // steps
+                List.of(),      // artifacts
+                List.of(),      // executionLog
+                null,           // summary
+                pendingFeedback,// pendingFeedback
+                null            // outputEvaluation
         );
     }
 
@@ -2034,12 +2062,12 @@ public class WorkflowService {
 
         return new WorkflowExecutionResponse(
                 objective,
-                null,
-                content,
-                collectResponseArtifacts(executedSteps),
-                summary,
-                executedSteps,
-                pendingFeedback
+                executedSteps,                      // steps
+                collectResponseArtifacts(executedSteps), // artifacts
+                List.of(content),                   // executionLog: HITL 用户提示信息
+                summary,                            // summary
+                pendingFeedback,                    // pendingFeedback
+                outputEvaluation                    // outputEvaluation
         );
     }
 
@@ -2095,7 +2123,15 @@ public class WorkflowService {
                 outputEvaluation
         );
 
-        return new WorkflowExecutionResponse(objective, deliverable, content, artifacts, summary, executedSteps, null);
+        return new WorkflowExecutionResponse(
+                objective,
+                executedSteps,  // steps
+                artifacts,      // artifacts
+                deliverable != null ? List.of(deliverable, content) : List.of(content),  // executionLog: [deliverable, report]
+                summary,        // summary
+                null,           // pendingFeedback
+                null            // outputEvaluation
+        );
     }
 
     WorkflowExecutionResponse createCompletedResponse(
@@ -2156,12 +2192,12 @@ public class WorkflowService {
         );
         return new WorkflowExecutionResponse(
                 objective,
-                deliverable,
-                content,
-                responseArtifacts,
-                summary,
-                executedSteps,
-                null
+                executedSteps,      // steps
+                responseArtifacts,  // artifacts
+                deliverable != null ? List.of(deliverable, content) : List.of(content),  // executionLog: [deliverable, report]
+                summary,            // summary
+                null,               // pendingFeedback
+                outputEvaluation    // outputEvaluation
         );
     }
 
@@ -2184,9 +2220,10 @@ public class WorkflowService {
             return null; // 摘要模式不生成 deliverable
         }
 
-        // 收集所有成功步骤的结果
+        // 收集所有成功步骤的结果（只包含 COMPLETED 状态，排除 SKIPPED）
         List<WorkflowStep> completedSteps = steps.stream()
-                .filter(s -> s != null && s.isCompleted() && s.getResult() != null && !s.getResult().isBlank())
+                .filter(s -> s != null && s.getStatus() == StepStatus.COMPLETED
+                        && s.getResult() != null && !s.getResult().isBlank())
                 .toList();
 
         if (completedSteps.isEmpty()) {
@@ -2534,12 +2571,12 @@ public class WorkflowService {
         );
         return new WorkflowExecutionResponse(
                 objective,
-                null,
-                content,
-                artifacts,
-                summary,
-                executedSteps,
-                null
+                executedSteps,  // steps
+                artifacts,      // artifacts
+                List.of(content),  // executionLog: 评估失败说明
+                summary,        // summary
+                null,           // pendingFeedback
+                outputEvaluation // outputEvaluation
         );
     }
 
@@ -2550,19 +2587,33 @@ public class WorkflowService {
         List<WorkflowStep> workflowSteps = response.steps() == null ? List.of() : response.steps();
         List<String> artifacts = response.artifacts() == null ? List.of() : response.artifacts();
 
-        // deliverable 作为 summary，content 作为详细内容
-        String summary = response.deliverable();
-        String content = response.content();
+        // 从 executionLog 提取 deliverable 和详细报告
+        // executionLog[0] = deliverable（最终交付内容）
+        // executionLog[1] = 详细执行报告（如果有）
+        List<String> logEntries = response.executionLog() != null ? response.executionLog() : List.of();
+        String summaryText;
+        String contentText;
+
+        if (!logEntries.isEmpty()) {
+            // 有交付内容：executionLog[0] = deliverable
+            summaryText = logEntries.get(0);
+            // executionLog[1] = 详细报告（如果有）
+            contentText = logEntries.size() > 1 ? logEntries.get(1) : "";
+        } else {
+            // 没有交付内容（如 HITL/失败/中断）：使用状态标签
+            summaryText = response.summary() != null ? response.summary().statusLabel() : "";
+            contentText = "";
+        }
 
         return new AgentResponse(
                 "plan-execute",
                 response.objective(),
-                summary,
-                content,
+                summaryText,
+                contentText,
                 planSteps,
                 workflowSteps,
                 artifacts,
-                List.of(),  // executionLog 已合并到 content
+                List.of(),  // executionLog 已合并到 summary/content
                 response.summary(),
                 response.pendingFeedback(),
                 null  // outputEvaluation 已合并到 summary
@@ -2619,10 +2670,7 @@ public class WorkflowService {
                 failedSteps,
                 status == WorkflowExecutionStatus.NEEDS_HUMAN_INTERVENTION,
                 currentStep,
-                evalStatus,
-                evalLabel,
-                evalMessage,
-                evalIssues
+                evalMessage  // userMessage - use eval message as user-facing message
         );
     }
 
@@ -2663,9 +2711,8 @@ public class WorkflowService {
         if (summary != null) {
             markdown.append(chinese ? "- 目标：" : "- Objective: ").append(objective).append("\n");
             markdown.append(chinese ? "- 状态：" : "- Status: ").append(summary.statusLabel()).append("\n");
-            // 添加评估状态（如果有）
-            if (summary.evaluationStatus() != null && summary.evaluationLabel() != null) {
-                markdown.append(chinese ? "- 评估：" : "- Evaluation: ").append(summary.evaluationLabel()).append("\n");
+            if (summary.userMessage() != null && !summary.userMessage().isBlank()) {
+                markdown.append(chinese ? "- 说明：" : "- Note: ").append(summary.userMessage()).append("\n");
             }
             markdown.append(chinese ? "- 总步骤数：" : "- Total steps: ").append(summary.totalSteps()).append("\n");
             markdown.append(chinese ? "- 已完成：" : "- Completed: ").append(summary.completedSteps()).append("\n");
@@ -2756,6 +2803,32 @@ public class WorkflowService {
         }
 
         return markdown.toString().trim();
+    }
+
+    /**
+     * 判断步骤是否为汇总/综合类步骤（无需调用工具，应基于已有步骤结果直接生成内容）。
+     * 典型特征：步骤描述中包含"综合以上信息"、"汇总"、"生成行程"等关键词。
+     */
+    private boolean isSynthesisStep(WorkflowStep step) {
+        if (step == null || step.description() == null) {
+            return false;
+        }
+        String normalized = step.description().toLowerCase();
+        // 中英文关键词匹配
+        return containsAny(normalized,
+                "综合以上", "综合以上信息", "汇总以上", "整合以上", "结合以上",
+                "基于以上", "根据以上", "综合已获取", "综合已收集",
+                "synthesize the above", "combine the above", "based on the above",
+                "compose a", "generate a comprehensive", "compile the above");
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String indentAsBlockQuote(String text) {
@@ -2923,6 +2996,20 @@ public class WorkflowService {
             return objectMapper.convertValue(rawRequest, HumanFeedbackRequest.class);
         } catch (IllegalArgumentException ex) {
             throw new IllegalStateException("Failed to coerce human feedback request from graph state", ex);
+        }
+    }
+
+    HumanFeedbackResponse coerceHumanFeedbackResponse(Object rawResponse) {
+        if (rawResponse == null) {
+            return null;
+        }
+        if (rawResponse instanceof HumanFeedbackResponse response) {
+            return response;
+        }
+        try {
+            return objectMapper.convertValue(rawResponse, HumanFeedbackResponse.class);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Failed to coerce human feedback response from graph state", ex);
         }
     }
 
@@ -3328,10 +3415,12 @@ public class WorkflowService {
      * 评估 plan 是否需要修订。
      *
      * 判断逻辑：
-     * 1. 单步骤任务 → 不需要（直接执行）
-     * 2. 产出文件类（needsFile）→ 不需要（skill 直接输出）
-     * 3. 多步骤但最后一步已是整合类 → 不需要
-     * 4. 多步骤且最后一步不是整合类，且有多个收集步骤 → 建议添加整合步骤
+     * 1. 空 plan → 不需要
+     * 2. 单步骤任务 → 不需要（直接执行）
+     * 3. 产出文件类（needsFile）→ 不需要（skill 直接输出）
+     *
+     * 注意：多收集步骤缺少整合的情况不再拦截，
+     * 改为在 finalizeOutput 时由 generateDeliverable 的 LLM 综合处理。
      */
     PlanEvaluationResult evaluatePlan(
             String objective,
@@ -3353,23 +3442,7 @@ public class WorkflowService {
             return PlanEvaluationResult.ok();
         }
 
-        // 检查最后一步是否已经是整合类步骤
-        String lastDescription = steps.get(steps.size() - 1).getDescription().toLowerCase();
-        if (isIntegrationStep(lastDescription)) {
-            return PlanEvaluationResult.ok();
-        }
-
-        // 检查是否有多个信息收集类步骤
-        long collectionSteps = countCollectionSteps(steps);
-        if (collectionSteps >= 2) {
-            String suggestion = ResponseLanguageHelper.choose(
-                    objective,
-                    "建议在 plan 末尾添加整合步骤，将收集的信息整合成最终交付物。",
-                    "Consider adding a final integration step to compose the collected information into the deliverable."
-            );
-            return PlanEvaluationResult.needsRevision(suggestion, List.of("缺少最终整合步骤"));
-        }
-
+        // 不再检查"缺少整合步骤"——generateDeliverable 会在最终交付时用 LLM 综合
         return PlanEvaluationResult.ok();
     }
 

@@ -101,7 +101,17 @@
       "Bash(mv src/test/java/com/openmanus/saa/integration/ConversationContextIntegrationTest.java.bak src/test/java/com/openmanus/saa/integration/ConversationContextIntegrationTest.java)",
       "Bash(mv src/test/java/com/openmanus/saa/model/context/ConversationContextTest.java.bak src/test/java/com/openmanus/saa/model/context/ConversationContextTest.java)",
       "Bash(mv src/test/java/com/openmanus/saa/service/context/ConversationContextFactoryTest.java.bak src/test/java/com/openmanus/saa/service/context/ConversationContextFactoryTest.java)",
-      "Bash(find D:/projects/untitled/openmanus-spring-ai-alibaba -name *.jar -path */spring-ai-alibaba-graph*)"
+      "Bash(find D:/projects/untitled/openmanus-spring-ai-alibaba -name *.jar -path */spring-ai-alibaba-graph*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(find ~/.m2/repository -name spring-ai-alibaba-graph*.jar)",
+      "Bash(find ~/.m2/repository -name *spring-ai-alibaba* -type d)",
+      "Bash(mkdir:*)",
+      "Bash(java -jar /tmp/cfr.jar /tmp/graph-decompile/com/alibaba/cloud/ai/graph/CompiledGraph.class --outputdir /tmp/graph-src)",
+      "Bash(java -jar /tmp/cfr.jar ~/.m2/repository/com/alibaba/cloud/ai/spring-ai-alibaba-graph-core/1.1.2.2/spring-ai-alibaba-graph-core-1.1.2.2.jar --outputdir /tmp/graph-src-full)",
+      "Read(//c/tmp/**)",
+      "Read(//cygdrive/c/tmp/**)",
+      "Bash(find /tmp/graph-src-full -name *.java)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

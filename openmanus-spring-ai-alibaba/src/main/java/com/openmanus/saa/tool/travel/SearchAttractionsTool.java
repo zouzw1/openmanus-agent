@@ -30,19 +30,20 @@ public class SearchAttractionsTool {
      * @param limit  返回数量上限，默认20
      * @return 景点列表的JSON字符串
      */
-    @Tool(description = "在指定城市搜索旅游景点。参数：city-城市名称(必填)，radius-搜索半径米数(可选默认5000)，limit-返回数量上限(可选默认20)")
+    @Tool(description = "在指定城市搜索旅游景点。参数：city-城市名称(必填)，radius-搜索半径米数(可选默认5000)，limit-返回数量上限(可选默认20)，countryCode-国家代码如CN/US(可选)")
     public String searchAttractions(
             @ToolParam(description = "城市名称，例如北京、上海") String city,
             @ToolParam(description = "搜索半径（米），默认5000") Integer radius,
-            @ToolParam(description = "返回数量上限，默认20") Integer limit) {
+            @ToolParam(description = "返回数量上限，默认20") Integer limit,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
             int effectiveRadius = radius != null ? radius : TravelConstants.DEFAULT_RADIUS;
             int effectiveLimit = limit != null ? limit : TravelConstants.DEFAULT_LIMIT;
 
-            GeoLocation location = apiClient.geocode(city);
-            // 搜索旅游相关POI: tourism=attraction, tourism=museum, tourism=viewpoint
-            String query = "tourism~\"attraction|museum|viewpoint|artwork|theme_park\"";
-            List<POIItem> attractions = apiClient.searchPoi(query, location, effectiveRadius, effectiveLimit);
+            GeoLocation location = apiClient.geocode(city, countryCode);
+            // 使用精确 tag 匹配搜索旅游景点（比正则匹配更稳定）
+            List<String> attractionTypes = List.of("attraction", "museum", "viewpoint", "artwork", "theme_park");
+            List<POIItem> attractions = apiClient.searchPoi("tourism", attractionTypes, location, effectiveRadius, effectiveLimit);
 
             return formatResult(city, attractions, "景点");
         } catch (TravelApiException e) {

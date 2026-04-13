@@ -2,7 +2,7 @@ package com.openmanus.saa.service.intent;
 
 import com.openmanus.saa.model.IntentResolution;
 import com.openmanus.saa.model.IntentRouteMode;
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.Session;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -13,7 +13,7 @@ import java.util.Optional;
 public abstract class AbstractIntentTreeRecognizer implements IntentRecognizer {
 
     @Override
-    public Optional<IntentResolution> recognize(String prompt, SessionState session) {
+    public Optional<IntentResolution> recognize(String prompt, Session session) {
         IntentTreeNode root = root();
         if (root == null) {
             return Optional.empty();
@@ -27,7 +27,7 @@ public abstract class AbstractIntentTreeRecognizer implements IntentRecognizer {
     private Optional<IntentDecision> resolveNode(
             IntentTreeNode node,
             String prompt,
-            SessionState session,
+            Session session,
             IntentDecision inheritedDecision
     ) {
         if (!node.matches(prompt, session)) {

@@ -1,15 +1,15 @@
 package com.openmanus.saa.service.intent;
 
-import com.openmanus.saa.model.session.SessionState;
+import com.openmanus.saa.model.session.Session;
 import java.util.List;
 
 public interface IntentTreeNode {
 
     String id();
 
-    boolean matches(String prompt, SessionState session);
+    boolean matches(String prompt, Session session);
 
-    default IntentDecision decision(String prompt, SessionState session) {
+    default IntentDecision decision(String prompt, Session session) {
         return IntentDecision.empty();
     }
 

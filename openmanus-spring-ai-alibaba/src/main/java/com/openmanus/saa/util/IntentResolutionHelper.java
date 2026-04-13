@@ -8,6 +8,9 @@ import java.util.Map;
 public final class IntentResolutionHelper {
 
     public static final String RESPONSE_MODE_ATTRIBUTE = "responseMode";
+    public static final String NEEDS_FILE_ATTRIBUTE = "needsFile";
+    public static final String USER_FORMAT_ATTRIBUTE = "userFormat";
+    public static final String REASON_ATTRIBUTE = "reason";
 
     private IntentResolutionHelper() {
     }
@@ -37,5 +40,32 @@ public final class IntentResolutionHelper {
                 attributes,
                 resolution.planningHints()
         );
+    }
+
+    public static boolean needsFile(IntentResolution resolution) {
+        if (resolution == null || resolution.attributes() == null) {
+            return false;
+        }
+        Object value = resolution.attributes().get(NEEDS_FILE_ATTRIBUTE);
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        return Boolean.TRUE.equals(String.valueOf(value));
+    }
+
+    public static String getUserSpecifiedFormat(IntentResolution resolution) {
+        if (resolution == null || resolution.attributes() == null) {
+            return null;
+        }
+        Object value = resolution.attributes().get(USER_FORMAT_ATTRIBUTE);
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    public static String getReason(IntentResolution resolution) {
+        if (resolution == null || resolution.attributes() == null) {
+            return null;
+        }
+        Object value = resolution.attributes().get(REASON_ATTRIBUTE);
+        return value != null ? String.valueOf(value) : null;
     }
 }

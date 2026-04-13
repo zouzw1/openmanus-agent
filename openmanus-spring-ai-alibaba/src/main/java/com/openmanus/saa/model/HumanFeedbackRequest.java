@@ -111,10 +111,12 @@ public class HumanFeedbackRequest {
         boolean chinese = ResponseLanguageHelper.detect(objective) == ResponseLanguageHelper.Language.ZH_CN;
         StringBuilder sb = new StringBuilder();
         sb.append(chinese ? "\u9700\u8981\u7528\u6237\u53cd\u9988\u3002\n\n" : "Need human feedback.\n\n");
-        sb.append(chinese ? "\u76ee\u6807: " : "Objective: ").append(objective).append("\n");
+        sb.append(chinese ? "\u76ee\u6807: " : "Objective: ").append(objective != null ? objective : "").append("\n");
         sb.append(chinese ? "\u6b65\u9aa4: " : "Step: ").append(stepIndex + 1).append("\n");
-        sb.append(chinese ? "\u4efb\u52a1: " : "Task: ").append(failedStep.getDescription()).append("\n");
-        sb.append(chinese ? "\u95ee\u9898: " : "Issue: ").append(errorMessage).append("\n");
+        if (failedStep != null) {
+            sb.append(chinese ? "\u4efb\u52a1: " : "Task: ").append(failedStep.getDescription()).append("\n");
+        }
+        sb.append(chinese ? "\u95ee\u9898: " : "Issue: ").append(errorMessage != null ? errorMessage : "").append("\n");
         if (suggestedAction != null && !suggestedAction.isBlank()) {
             sb.append(chinese ? "\u5efa\u8bae\u64cd\u4f5c: " : "Suggested action: ")
                     .append(suggestedAction)

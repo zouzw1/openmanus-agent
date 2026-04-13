@@ -39,20 +39,49 @@ public class TravelApiClient {
     // ==================== Geocoding ====================
 
     public GeoLocation geocode(String city) {
+        return geocode(city, null);
+    }
+
+    public GeoLocation geocode(String city, String countryCode) {
         Objects.requireNonNull(city, "城市名称不能为空");
         try {
+            // 自动检测中文城市名，默认使用 CN 以避免地理编码歧义
+            String effectiveCountryCode = countryCode;
+            if ((effectiveCountryCode == null || effectiveCountryCode.isBlank()) && containsCJK(city)) {
+                effectiveCountryCode = "CN";
+            }
+
             String encodedCity = URLEncoder.encode(city, StandardCharsets.UTF_8);
-            String url = String.format("%s?name=%s&count=1&language=zh&format=json",
-                    GEOCODING_URL, encodedCity);
-            log.info("调用地理编码API: 城市={}", city);
-            JsonNode root = getJson(url, "Geocoding");
+            StringBuilder urlBuilder = new StringBuilder(GEOCODING_URL)
+                    .append("?name=").append(encodedCity)
+                    .append("&count=5&language=zh&format=json");
+
+            if (effectiveCountryCode != null && !effectiveCountryCode.isBlank()) {
+                urlBuilder.append("&countryCode=").append(effectiveCountryCode);
+            }
+
+            log.info("调用地理编码API: 城市={}, 国家={}", city, effectiveCountryCode != null ? effectiveCountryCode : "不限");
+            JsonNode root = getJson(urlBuilder.toString(), "Geocoding");
             JsonNode results = root.get("results");
             if (results == null || results.isEmpty()) {
                 throw new TravelApiException("Geocoding", "未找到城市: " + city);
             }
-            double lat = results.get(0).get("latitude").asDouble();
-            double lon = results.get(0).get("longitude").asDouble();
-            log.info("地理编码成功: 城市={}, 坐标=({}, {})", city, lat, lon);
+
+            // 选择最佳匹配：优先选择人口最多的（通常是主要城市）
+            JsonNode bestMatch = results.get(0);
+            int maxPopulation = bestMatch.path("population").asInt(0);
+            for (JsonNode result : results) {
+                int population = result.path("population").asInt(0);
+                if (population > maxPopulation) {
+                    maxPopulation = population;
+                    bestMatch = result;
+                }
+            }
+
+            double lat = bestMatch.get("latitude").asDouble();
+            double lon = bestMatch.get("longitude").asDouble();
+            String matchedName = bestMatch.path("name").asText(city);
+            log.info("地理编码成功: 城市={}, 匹配={}, 坐标=({}, {}), 人口={}", city, matchedName, lat, lon, maxPopulation);
             return new GeoLocation(lat, lon);
         } catch (TravelApiException e) {
             throw e;
@@ -63,8 +92,18 @@ public class TravelApiClient {
 
     // ==================== POI Search ====================
 
-    public List<POIItem> searchPoi(String query, GeoLocation location, int radius, int limit) {
-        Objects.requireNonNull(query, "查询条件不能为空");
+    /**
+     * POI 搜索 - 使用 union 组合多个精确 tag 匹配，比正则匹配更稳定
+     *
+     * @param tagKey     POI tag 键名（如 "tourism", "amenity"）
+     * @param tagValues  POI tag 值列表（如 ["attraction", "museum", "viewpoint"]）
+     * @param location   中心位置
+     * @param radius     搜索半径（米）
+     * @param limit      返回数量上限
+     */
+    public List<POIItem> searchPoi(String tagKey, List<String> tagValues, GeoLocation location, int radius, int limit) {
+        Objects.requireNonNull(tagKey, "tagKey 不能为空");
+        Objects.requireNonNull(tagValues, "tagValues 不能为空");
         Objects.requireNonNull(location, "位置信息不能为空");
         if (radius <= 0) {
             throw new IllegalArgumentException("搜索半径必须大于0");
@@ -73,17 +112,28 @@ public class TravelApiClient {
             throw new IllegalArgumentException("返回数量限制必须大于0");
         }
         try {
+            // 使用 union 组合多个精确匹配查询，比正则匹配更稳定
+            StringBuilder nodeQueries = new StringBuilder();
+            for (String value : tagValues) {
+                if (!nodeQueries.isEmpty()) {
+                    nodeQueries.append(";");
+                }
+                nodeQueries.append(String.format("node[\"%s\"=\"%s\"](around:%d,%f,%f)",
+                        tagKey, value, radius, location.lat(), location.lon()));
+            }
+
             String overpassQuery = String.format(
-                    "[out:json][timeout:25];(node[%s](around:%d,%f,%f););out center %d;",
-                    query, radius, location.lat(), location.lon(), limit);
+                    "[out:json][timeout:25];(%s);out center %d;",
+                    nodeQueries, limit);
 
-            log.info("调用POI搜索API: query={}, 位置=({}, {}), 半径={}m", query, location.lat(), location.lon(), radius);
+            log.info("调用POI搜索API: tag={}:{}, 位置=({}, {}), 半径={}m", tagKey, tagValues, location.lat(), location.lon(), radius);
 
+            String encodedQuery = URLEncoder.encode(overpassQuery, StandardCharsets.UTF_8);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(OVERPASS_URL))
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .timeout(Duration.ofSeconds(30))
-                    .POST(HttpRequest.BodyPublishers.ofString("data=" + overpassQuery))
+                    .POST(HttpRequest.BodyPublishers.ofString("data=" + encodedQuery))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -103,7 +153,7 @@ public class TravelApiClient {
                     address = address.trim();
                     if (address.isEmpty()) address = null;
 
-                    String type = element.path("tags").path(query.split("=")[0]).asText("");
+                    String type = element.path("tags").path(tagKey).asText("");
                     List<String> tags = new ArrayList<>();
                     element.path("tags").fieldNames().forEachRemaining(tags::add);
 
@@ -117,7 +167,7 @@ public class TravelApiClient {
         } catch (TravelApiException e) {
             throw e;
         } catch (Exception e) {
-            throw new TravelApiException("Overpass", "POI搜索失败: " + query, e);
+            throw new TravelApiException("Overpass", "POI搜索失败: " + tagKey + "=" + tagValues, e);
         }
     }
 
@@ -128,7 +178,8 @@ public class TravelApiClient {
         Objects.requireNonNull(destination, "终点位置不能为空");
         Objects.requireNonNull(mode, "交通方式不能为空");
         try {
-            String coords = origin.toCoordinateString() + ";" + destination.toCoordinateString();
+            // OSRM 要求 lon,lat 格式（经度在前），而 GeoLocation.toCoordinateString() 是 lat,lon
+            String coords = origin.lon() + "," + origin.lat() + ";" + destination.lon() + "," + destination.lat();
             String url = String.format("%s/route/v1/%s/%s?steps=true&overview=false",
                     OSRM_URL, mode.toOsrmString(), coords);
 
@@ -329,6 +380,13 @@ public class TravelApiClient {
         } catch (Exception e) {
             throw new TravelApiException(apiName, "API调用失败: " + url, e);
         }
+    }
+
+    private boolean containsCJK(String text) {
+        return text != null && text.codePoints().anyMatch(cp ->
+                (cp >= 0x4E00 && cp <= 0x9FFF) ||   // CJK Unified Ideographs
+                (cp >= 0x3400 && cp <= 0x4DBF) ||   // CJK Unified Ideographs Extension A
+                (cp >= 0xF900 && cp <= 0xFAFF));     // CJK Compatibility Ideographs
     }
 
     private String interpretWeatherCode(int code, boolean isDay) {

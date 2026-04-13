@@ -29,12 +29,13 @@ public class QueryForecastTool {
      * @param days 预报天数（1-7天）
      * @return 天气预报信息的JSON字符串
      */
-    @Tool(description = "查询指定城市未来几天的天气预报。参数：city-城市名称(必填)，days-预报天数(可选默认7，范围1-7)")
+    @Tool(description = "查询指定城市未来几天的天气预报。参数：city-城市名称(必填)，days-预报天数(可选默认7，范围1-7)，countryCode-国家代码如CN/US(可选)")
     public String queryForecast(
             @ToolParam(description = "城市名称，例如北京、上海") String city,
-            @ToolParam(description = "预报天数，范围1-7，默认7天") Integer days) {
+            @ToolParam(description = "预报天数，范围1-7，默认7天") Integer days,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
-            GeoLocation location = apiClient.geocode(city);
+            GeoLocation location = apiClient.geocode(city, countryCode);
             int effectiveDays = days != null ? Math.min(Math.max(days, 1), TravelConstants.MAX_FORECAST_DAYS) : TravelConstants.MAX_FORECAST_DAYS;
 
             List<ForecastInfo> forecasts = apiClient.getForecast(location, effectiveDays);

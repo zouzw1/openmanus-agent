@@ -10,4 +10,8 @@ public interface SpecialistAgent {
     String description();
 
     AgentExecutionResult execute(AgentDefinition agentDefinition, String objective, String currentPlan, WorkflowStep step, String stepPrompt);
+
+    default AgentExecutionResult execute(AgentDefinition agentDefinition, String objective, String currentPlan, WorkflowStep step, String stepPrompt, String sessionId) {
+        return execute(agentDefinition, objective, currentPlan, step, stepPrompt);
+    }
 }

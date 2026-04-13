@@ -2,6 +2,8 @@ package com.openmanus.saa.service;
 
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.CompileConfig;
+import com.alibaba.cloud.ai.graph.KeyStrategy;
+import com.alibaba.cloud.ai.graph.KeyStrategyFactory;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.StateGraph;
@@ -74,10 +76,36 @@ final class WorkflowGraphOrchestrator {
 
     /**
      * 构建统一的工作流状态图。
+     *
+     * <p>关键修复：必须注册所有状态 keys 的 KeyStrategy，否则 resume 时
+     * OverAllState.input() 方法会因为空的 keyStrategies 而过滤掉 checkpoint 的所有数据。
+     * 参见 spring-ai-alibaba-graph 框架的 OverAllState.input() 实现。
      */
     private CompiledGraph buildUnifiedGraph() {
         try {
-            StateGraph graph = new StateGraph();
+            // ========== KeyStrategy 注册（修复 resume 数据丢失问题）==========
+            // 所有需要在 checkpoint 中持久化的状态 keys 都必须注册 KeyStrategy
+            KeyStrategyFactory keyStrategyFactory = KeyStrategy.builder()
+                    .addStrategy("sessionId")
+                    .addStrategy("objective")
+                    .addStrategy(WorkflowCheckpointService.PLAN_ID_KEY)
+                    .addStrategy(WorkflowCheckpointService.WORKFLOW_STEPS_KEY)
+                    .addStrategy(WorkflowCheckpointService.CURRENT_STEP_INDEX_KEY)
+                    .addStrategy(WorkflowCheckpointService.EXECUTED_STEP_COUNT_KEY)
+                    .addStrategy(WorkflowCheckpointService.LOOP_CONTINUE_KEY)
+                    .addStrategy(WorkflowCheckpointService.PENDING_FEEDBACK_KEY)
+                    .addStrategy(WorkflowCheckpointService.FEEDBACK_WAIT_KEY)
+                    .addStrategy(WorkflowCheckpointService.FEEDBACK_RESPONSE_KEY)
+                    .addStrategy(WorkflowCheckpointService.NEXT_NODE_KEY)
+                    .addStrategy(WorkflowCheckpointService.INTENT_RESOLUTION_KEY)
+                    .addStrategy(WorkflowCheckpointService.RESPONSE_MODE_KEY)
+                    .addStrategy(WorkflowCheckpointService.WORKFLOW_RESPONSE_KEY)
+                    .addStrategy("planEvaluationResult")
+                    .addStrategy("outputEvaluation")
+                    .defaultStrategy(KeyStrategy.REPLACE)
+                    .build();
+
+            StateGraph graph = new StateGraph(keyStrategyFactory);
 
             // ========== 节点定义 ==========
 

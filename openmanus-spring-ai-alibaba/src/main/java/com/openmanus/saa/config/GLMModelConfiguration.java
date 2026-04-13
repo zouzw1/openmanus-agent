@@ -20,7 +20,7 @@ import org.springframework.context.annotation.Primary;
         com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeChatAutoConfiguration.class,
         com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeAudioSpeechAutoConfiguration.class
 })
-public class GlmModelConfiguration {
+public class GLMModelConfiguration {
 
     /**
      * 创建 GLM ChatModel Bean

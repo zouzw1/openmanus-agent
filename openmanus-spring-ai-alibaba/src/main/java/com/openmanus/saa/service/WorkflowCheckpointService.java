@@ -4,6 +4,7 @@ import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.openmanus.saa.model.HumanFeedbackRequest;
 import com.openmanus.saa.model.HumanFeedbackResponse;
+import com.openmanus.saa.model.InferencePolicy;
 import com.openmanus.saa.model.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -175,6 +176,7 @@ public class WorkflowCheckpointService {
      */
     public void injectFeedback(String sessionId, HumanFeedbackResponse feedback, HumanFeedbackRequest pendingFeedback) {
         Map<String, Object> updates = new HashMap<>();
+        updates.put("sessionId", sessionId);  // 必须保存，resume 后 resolveFeedbackNode 需要从 state 中读取
         updates.put(FEEDBACK_RESPONSE_KEY, feedback);
         updates.put(PENDING_FEEDBACK_KEY, pendingFeedback);
         updates.put(FEEDBACK_WAIT_KEY, false);
@@ -230,8 +232,10 @@ public class WorkflowCheckpointService {
         }
         return switch (feedback.getAction()) {
             case ABORT_PLAN -> "abort";
-            case SKIP_STEP -> "skipStep";
-            case RETRY, PROVIDE_INFO, MODIFY_AND_RETRY -> "executeStep";
+            // SKIP_STEP: resolveFeedbackNode 已内部处理跳过逻辑，之后继续执行后续步骤
+            case SKIP_STEP -> "execute";
+            // RETRY/PROVIDE_INFO/MODIFY_AND_RETRY: 继续执行当前或后续步骤
+            case RETRY, PROVIDE_INFO, MODIFY_AND_RETRY -> "execute";
         };
     }
 
@@ -254,6 +258,61 @@ public class WorkflowCheckpointService {
             );
         }
         return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    HumanFeedbackResponse coerceHumanFeedbackResponse(Object obj) {
+        if (obj instanceof HumanFeedbackResponse) {
+            return (HumanFeedbackResponse) obj;
+        }
+        if (obj instanceof Map) {
+            Map<String, Object> map = (Map<String, Object>) obj;
+            String actionStr = (String) map.get("action");
+            HumanFeedbackResponse.ActionType action = actionStr != null
+                    ? HumanFeedbackResponse.ActionType.valueOf(actionStr)
+                    : HumanFeedbackResponse.ActionType.PROVIDE_INFO;
+            String providedInfo = (String) map.get("providedInfo");
+            String modifiedParams = (String) map.get("modifiedParams");
+            InferencePolicy inferencePolicy = coerceInferencePolicy(map.get("inferencePolicy"));
+            boolean replanRequired = map.get("replanRequired") instanceof Boolean b && b;
+            String updatedObjective = (String) map.get("updatedObjective");
+            return new HumanFeedbackResponse(action, providedInfo, modifiedParams, inferencePolicy, replanRequired, updatedObjective);
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private InferencePolicy coerceInferencePolicy(Object obj) {
+        if (obj instanceof InferencePolicy) {
+            return (InferencePolicy) obj;
+        }
+        if (obj instanceof Map) {
+            Map<String, Object> map = (Map<String, Object>) obj;
+            return new InferencePolicy(
+                    map.get("inferenceAllowed") instanceof Boolean b && b,
+                    (String) map.get("inferenceScope"),
+                    coerceStringList(map.get("providedFacts")),
+                    coerceStringList(map.get("delegatedFields")),
+                    coerceStringList(map.get("mustConfirmFields")),
+                    (String) map.get("rationale")
+            );
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> coerceStringList(Object obj) {
+        if (obj instanceof List) {
+            List<?> list = (List<?>) obj;
+            List<String> result = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof String s && !s.isBlank()) {
+                    result.add(s);
+                }
+            }
+            return List.copyOf(result);
+        }
+        return List.of();
     }
 
     @SuppressWarnings("unchecked")

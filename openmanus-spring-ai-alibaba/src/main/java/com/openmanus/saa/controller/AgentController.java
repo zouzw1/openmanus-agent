@@ -82,6 +82,8 @@ public class AgentController {
                 null
             );
             HumanFeedbackResponse feedback = humanFeedbackResolutionService.resolve(feedbackRequest, pendingFeedback);
+            // 保存用户反馈消息到 session
+            workflowService.saveUserMessage(request.sessionId(), request.prompt());
             return workflowService.submitHumanFeedbackAsAgentResponse(request.sessionId(), feedback);
         }
 

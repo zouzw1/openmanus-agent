@@ -30,19 +30,20 @@ public class SearchHotelsTool {
      * @param limit  返回数量上限，默认20
      * @return 酒店列表的JSON字符串
      */
-    @Tool(description = "在指定城市搜索酒店和住宿场所。参数：city-城市名称(必填)，radius-搜索半径米数(可选默认5000)，limit-返回数量上限(可选默认20)")
+    @Tool(description = "在指定城市搜索酒店和住宿场所。参数：city-城市名称(必填)，radius-搜索半径米数(可选默认5000)，limit-返回数量上限(可选默认20)，countryCode-国家代码如CN/US(可选)")
     public String searchHotels(
             @ToolParam(description = "城市名称，例如北京、上海") String city,
             @ToolParam(description = "搜索半径（米），默认5000") Integer radius,
-            @ToolParam(description = "返回数量上限，默认20") Integer limit) {
+            @ToolParam(description = "返回数量上限，默认20") Integer limit,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
             int effectiveRadius = radius != null ? radius : TravelConstants.DEFAULT_RADIUS;
             int effectiveLimit = limit != null ? limit : TravelConstants.DEFAULT_LIMIT;
 
-            GeoLocation location = apiClient.geocode(city);
-            // 搜索住宿相关POI: tourism=hotel, tourism=hostel, tourism=guest_house
-            String query = "tourism~\"hotel|hostel|guest_house|apartment|motel|chalet\"";
-            List<POIItem> hotels = apiClient.searchPoi(query, location, effectiveRadius, effectiveLimit);
+            GeoLocation location = apiClient.geocode(city, countryCode);
+            // 使用精确 tag 匹配搜索住宿（比正则匹配更稳定）
+            List<String> hotelTypes = List.of("hotel", "hostel", "guest_house", "apartment", "motel", "chalet");
+            List<POIItem> hotels = apiClient.searchPoi("tourism", hotelTypes, location, effectiveRadius, effectiveLimit);
 
             return formatResult(city, hotels, "酒店");
         } catch (TravelApiException e) {

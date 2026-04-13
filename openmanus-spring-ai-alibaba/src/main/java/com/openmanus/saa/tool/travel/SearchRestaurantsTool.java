@@ -30,19 +30,20 @@ public class SearchRestaurantsTool {
      * @param limit  返回数量上限，默认20
      * @return 餐厅列表的JSON字符串
      */
-    @Tool(description = "在指定城市搜索餐厅和餐饮场所。参数：city-城市名称(必填)，radius-搜索半径米数(可选默认5000)，limit-返回数量上限(可选默认20)")
+    @Tool(description = "在指定城市搜索餐厅和餐饮场所。参数：city-城市名称(必填)，radius-搜索半径米数(可选默认5000)，limit-返回数量上限(可选默认20)，countryCode-国家代码如CN/US(可选)")
     public String searchRestaurants(
             @ToolParam(description = "城市名称，例如北京、上海") String city,
             @ToolParam(description = "搜索半径（米），默认5000") Integer radius,
-            @ToolParam(description = "返回数量上限，默认20") Integer limit) {
+            @ToolParam(description = "返回数量上限，默认20") Integer limit,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
             int effectiveRadius = radius != null ? radius : TravelConstants.DEFAULT_RADIUS;
             int effectiveLimit = limit != null ? limit : TravelConstants.DEFAULT_LIMIT;
 
-            GeoLocation location = apiClient.geocode(city);
-            // 搜索餐饮相关POI: amenity=restaurant, amenity=cafe, amenity=fast_food
-            String query = "amenity~\"restaurant|cafe|fast_food|bar|pub|biergarten|food_court\"";
-            List<POIItem> restaurants = apiClient.searchPoi(query, location, effectiveRadius, effectiveLimit);
+            GeoLocation location = apiClient.geocode(city, countryCode);
+            // 使用精确 tag 匹配搜索餐饮（比正则匹配更稳定）
+            List<String> foodTypes = List.of("restaurant", "cafe", "fast_food", "bar", "pub", "biergarten", "food_court");
+            List<POIItem> restaurants = apiClient.searchPoi("amenity", foodTypes, location, effectiveRadius, effectiveLimit);
 
             return formatResult(city, restaurants, "餐厅");
         } catch (TravelApiException e) {

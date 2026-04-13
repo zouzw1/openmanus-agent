@@ -2,6 +2,7 @@ package com.openmanus.saa.service.supervisor;
 
 import com.openmanus.saa.model.AgentTask;
 import com.openmanus.saa.model.AgentType;
+import com.openmanus.saa.service.supervisor.TaskExecutionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

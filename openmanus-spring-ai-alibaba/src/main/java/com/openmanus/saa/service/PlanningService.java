@@ -203,6 +203,8 @@ public class PlanningService {
                          15. Only add a final export or file-writing delivery step when the user explicitly requests a file/document/export/save-to-workspace result or a specific output format.
                          16. Only reference tools, MCP tools, and skills that are explicitly available in the capability list and tool guidance above.
                          17. Never propose a fake office deliverable such as writing plain text into a .docx/.pdf/.pptx file when the required export capability is unavailable.
+                         18. CRITICAL: Use ONLY ONE export/transform skill for the final deliverable format. Never chain multiple format conversions (e.g., Markdown→PDF→Word). Go directly from source content to the requested format.
+                         19. When the user requests format X, select the skill that directly produces X. Do not use intermediate formats unless the skill explicitly requires it.
 
                          Return JSON only as an array.
                          Each item must follow this schema:
@@ -331,6 +333,7 @@ public class PlanningService {
         List<WorkflowStep> deduplicatedSteps = removeDuplicateWorkflowSteps(enrichedSteps);
         List<WorkflowStep> normalizedSteps = enforceWorkflowStructure(objective, deduplicatedSteps, agentSnapshots);
         removeRedundantOfficeDeliveryWrites(normalizedSteps);
+        removeIntermediateFormatConversions(normalizedSteps, objective);
         validateWorkflowPlanOrThrow(objective, normalizedSteps, agentSnapshots);
         return normalizedSteps;
     }
@@ -402,6 +405,10 @@ public class PlanningService {
                     if (validation.isValidateAgentCapabilities() && !snapshot.supportsReadSkill()) {
                         errors.add("Step " + (i + 1) + " requires read_skill, but agent '" + snapshot.agentId() + "' has no allowed skills.");
                     }
+                    continue;
+                }
+                // 如果该工具已在前面步骤中出现过，说明当前步骤只是引用之前的输出，不需要验证参数
+                if (isToolUsedInPreviousSteps(requiredTool, workflowSteps, i)) {
                     continue;
                 }
                 if (validation.isValidateAgentCapabilities() && !snapshot.hasLocalTool(requiredTool)) {
@@ -1112,6 +1119,23 @@ public class PlanningService {
         return "read_skill".equals(toolName) || toolRegistryService.getTool(toolName).isPresent();
     }
 
+    /**
+     * 检查某个工具是否已经在前面步骤中使用过。
+     * 如果是，说明当前步骤只是引用之前步骤的输出（如"将 X 的输出整合..."），不需要再验证参数。
+     */
+    private boolean isToolUsedInPreviousSteps(String toolName, List<WorkflowStep> allSteps, int currentStepIndex) {
+        if (toolName == null || currentStepIndex <= 0) {
+            return false;
+        }
+        for (int i = 0; i < currentStepIndex; i++) {
+            List<String> prevTools = allSteps.get(i).requiredTools();
+            if (prevTools != null && prevTools.contains(toolName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void enrichSkillMetadata(
             String stepDescription,
             String objective,
@@ -1498,6 +1522,61 @@ public class PlanningService {
 
         steps.clear();
         steps.addAll(filtered);
+    }
+
+    /**
+     * 检测并移除格式转换链中的多余中间步骤。
+     * 例如：当用户要求 Word 输出时，不应出现 Markdown→PDF→Word 的链路，
+     * 而应直接 Markdown→Word。
+     */
+    private void removeIntermediateFormatConversions(List<WorkflowStep> steps, String objective) {
+        if (steps == null || steps.size() <= 1) {
+            return;
+        }
+
+        String requestedFormat = inferRequestedDeliverableFormat(objective);
+        if (requestedFormat == null || requestedFormat.isBlank()) {
+            return;
+        }
+
+        // 查找所有导出/转换步骤
+        List<Integer> exportStepIndices = new ArrayList<>();
+        for (int i = 0; i < steps.size(); i++) {
+            if (isExportTransformStep(steps.get(i))) {
+                exportStepIndices.add(i);
+            }
+        }
+
+        if (exportStepIndices.size() <= 1) {
+            return;
+        }
+
+        // 检查是否存在格式转换链：中间步骤的输出格式 ≠ 用户请求的格式
+        List<Integer> redundantIndices = new ArrayList<>();
+        for (int idx : exportStepIndices) {
+            WorkflowStep step = steps.get(idx);
+            String stepFormat = inferStepTargetFormat(step);
+            if (stepFormat != null && !stepFormat.equals(requestedFormat)) {
+                // 这个导出步骤产生的格式不是用户请求的最终格式，是多余的中间步骤
+                // 只有当后续确实有步骤产生用户请求的格式时才移除
+                boolean hasLaterTargetFormat = exportStepIndices.stream()
+                        .filter(laterIdx -> laterIdx > idx)
+                        .map(laterIdx -> inferStepTargetFormat(steps.get(laterIdx)))
+                        .anyMatch(laterFormat -> requestedFormat.equals(laterFormat));
+                if (hasLaterTargetFormat) {
+                    log.warn("Removing intermediate format conversion step {} (format={}) when target format is {}",
+                            idx + 1, stepFormat, requestedFormat);
+                    redundantIndices.add(idx);
+                }
+            }
+        }
+
+        if (!redundantIndices.isEmpty()) {
+            // 从后往前移除，避免索引偏移
+            for (int i = redundantIndices.size() - 1; i >= 0; i--) {
+                steps.remove(redundantIndices.get(i).intValue());
+            }
+        }
     }
 
     private boolean isDuplicateOfficeExportStep(

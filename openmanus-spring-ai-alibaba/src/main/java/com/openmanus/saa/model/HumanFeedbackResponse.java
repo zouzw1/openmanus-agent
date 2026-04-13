@@ -1,5 +1,8 @@
 package com.openmanus.saa.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class HumanFeedbackResponse {
 
     public enum ActionType {
@@ -30,13 +33,14 @@ public class HumanFeedbackResponse {
         this(action, providedInfo, modifiedParams, inferencePolicy, false, null);
     }
 
+    @JsonCreator
     public HumanFeedbackResponse(
-            ActionType action,
-            String providedInfo,
-            String modifiedParams,
-            InferencePolicy inferencePolicy,
-            boolean replanRequired,
-            String updatedObjective
+            @JsonProperty("action") ActionType action,
+            @JsonProperty("providedInfo") String providedInfo,
+            @JsonProperty("modifiedParams") String modifiedParams,
+            @JsonProperty("inferencePolicy") InferencePolicy inferencePolicy,
+            @JsonProperty("replanRequired") boolean replanRequired,
+            @JsonProperty("updatedObjective") String updatedObjective
     ) {
         this.action = action;
         this.providedInfo = providedInfo;

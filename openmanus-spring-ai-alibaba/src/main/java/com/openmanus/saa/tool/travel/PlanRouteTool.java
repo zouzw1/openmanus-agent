@@ -29,14 +29,15 @@ public class PlanRouteTool {
      * @param transportMode  交通方式
      * @return 详细路线规划的JSON字符串
      */
-    @Tool(description = "规划两个城市之间的详细导航路线。参数：fromCity-起点城市(必填)，toCity-终点城市(必填)，transportMode-交通方式(可选默认driving)")
+    @Tool(description = "规划两个城市之间的详细导航路线。参数：fromCity-起点城市(必填)，toCity-终点城市(必填)，transportMode-交通方式(可选默认driving)，countryCode-国家代码如CN/US(可选)")
     public String planRoute(
             @ToolParam(description = "起点城市名称") String fromCity,
             @ToolParam(description = "终点城市名称") String toCity,
-            @ToolParam(description = "交通方式：driving(驾车)、walking(步行)、cycling(骑行)") String transportMode) {
+            @ToolParam(description = "交通方式：driving(驾车)、walking(步行)、cycling(骑行)") String transportMode,
+            @ToolParam(description = "国家代码如CN/US/JP，用于精确地理编码") String countryCode) {
         try {
-            GeoLocation from = apiClient.geocode(fromCity);
-            GeoLocation to = apiClient.geocode(toCity);
+            GeoLocation from = apiClient.geocode(fromCity, countryCode);
+            GeoLocation to = apiClient.geocode(toCity, countryCode);
 
             TravelConstants.TransportMode mode = parseTransportMode(transportMode);
             RouteResult route = apiClient.getRoute(from, to, mode);
