@@ -2399,6 +2399,111 @@ public class WorkflowService {
     }
 
     /**
+     * 使用 LLM 补全跳过步骤的缺失内容，生成完整交付物。
+     *
+     * @param objective 用户原始请求
+     * @param allSteps 所有步骤（包含 COMPLETED 和 SKIPPED）
+     * @param artifacts 生成的产物文件路径列表
+     * @return LLM 生成的完整交付内容（含补全标注）
+     */
+    private String synthesizeWithSkippedSteps(
+            String objective,
+            List<WorkflowStep> allSteps,
+            List<String> artifacts
+    ) {
+        // 1. 构建完整计划上下文（所有步骤描述 + 状态）
+        StringBuilder planContext = new StringBuilder();
+        for (int i = 0; i < allSteps.size(); i++) {
+            WorkflowStep step = allSteps.get(i);
+            String statusLabel = step.getStatus() == StepStatus.SKIPPED ? "[已跳过]" : "[已完成]";
+            planContext.append(i + 1).append(". ")
+                    .append(step.getDescription())
+                    .append(" ")
+                    .append(statusLabel)
+                    .append("\n");
+        }
+
+        // 2. 收集已完成步骤的真实数据
+        StringBuilder completedData = new StringBuilder();
+        for (WorkflowStep step : allSteps) {
+            if (step.getStatus() != StepStatus.COMPLETED) {
+                continue;
+            }
+            completedData.append("### ").append(step.getDescription()).append("\n");
+            if (step.getToolOutputs() != null && !step.getToolOutputs().isEmpty()) {
+                for (String output : step.getToolOutputs()) {
+                    if (output != null && !output.isBlank()) {
+                        completedData.append(extractToolOutput(output)).append("\n\n");
+                    }
+                }
+            } else if (step.getResult() != null && !step.getResult().isBlank()) {
+                completedData.append(step.getResult()).append("\n\n");
+            }
+        }
+
+        // 3. 读取 artifacts 文件内容
+        StringBuilder artifactContent = new StringBuilder();
+        if (artifacts != null) {
+            for (String artifactPath : artifacts) {
+                try {
+                    Path path = Paths.get(artifactPath);
+                    if (Files.exists(path)) {
+                        String content = Files.readString(path);
+                        artifactContent.append("### 文件: ")
+                                .append(path.getFileName())
+                                .append("\n")
+                                .append(content)
+                                .append("\n\n");
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to read artifact: {}", artifactPath, e);
+                }
+            }
+        }
+
+        // 4. 获取输出指导
+        String outputGuidance = inferOutputGuidance(objective);
+
+        // 5. 构建 prompt 并调用 LLM
+        String prompt = buildSkippedStepPrompt(
+                objective,
+                planContext.toString(),
+                completedData.toString(),
+                artifactContent.toString(),
+                outputGuidance
+        );
+
+        try {
+            return chatClient.prompt()
+                    .system("""
+                        You are a professional content generation assistant.
+
+                        The user requested a workflow with multiple steps. Some steps were completed
+                        successfully (with real data), while others were skipped (no real data available).
+
+                        Your task:
+                        1. Generate the complete deliverable the user requested
+                        2. Use real data from completed steps whenever possible
+                        3. For skipped steps, generate reasonable content based on your knowledge
+                        4. At the END of your output, add a note listing which parts were AI-generated
+                           due to skipped steps
+
+                        Principles:
+                        - Output the complete deliverable first, then the annotation at the end
+                        - AI-generated content should be reasonable and useful
+                        - Do NOT use process language like "Based on the data..."
+                        - Directly output the final result the user can use
+                        """)
+                    .user(prompt)
+                    .call()
+                    .content();
+        } catch (Exception e) {
+            log.warn("Failed to synthesize with skipped steps, returning artifact info", e);
+            return formatArtifactsOutput(objective, artifacts);
+        }
+    }
+
+    /**
      * 从工具输出中提取数据部分（去掉工具名前缀）
      */
     private String extractToolOutput(String toolOutput) {
