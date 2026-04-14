@@ -23,10 +23,12 @@ import com.openmanus.saa.model.WorkflowExecutionResponse;
 import com.openmanus.saa.model.WorkflowExecutionStatus;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.model.WorkflowSummary;
+import com.openmanus.saa.model.context.WorkflowState;
 import com.openmanus.saa.model.session.Session;
 import com.openmanus.saa.service.agent.AgentExecutionResult;
 import com.openmanus.saa.service.agent.SpecialistAgent;
 import com.openmanus.saa.service.intent.IntentResolutionService;
+import com.openmanus.saa.service.context.ConversationContextFactory;
 import com.openmanus.saa.service.session.SessionManager;
 import com.openmanus.saa.service.session.SessionMemoryService;
 import com.openmanus.saa.service.summary.WorkflowSummaryContext;
@@ -105,6 +107,7 @@ public class WorkflowService {
     private final WorkflowGraphOrchestrator graphOrchestrator;
     private final WorkflowLifecycleNodeHandler lifecycleNodeHandler;
     private final SupervisorAgentService supervisorAgentService;
+    private final ConversationContextFactory conversationContextFactory;
 
     public WorkflowService(
             ChatClient chatClient,
@@ -121,7 +124,8 @@ public class WorkflowService {
             IntentResolutionService intentResolutionService,
             List<WorkflowSummaryFormatter> workflowSummaryFormatters,
             SupervisorAgentService supervisorAgentService,
-            WorkflowCheckpointService checkpointService
+            WorkflowCheckpointService checkpointService,
+            ConversationContextFactory conversationContextFactory
     ) {
         this.chatClient = chatClient;
         this.planningService = planningService;
@@ -145,6 +149,7 @@ public class WorkflowService {
         this.lifecycleNodeHandler = new WorkflowLifecycleNodeHandler(this);
         this.graphOrchestrator = new WorkflowGraphOrchestrator(this, checkpointService);
         this.supervisorAgentService = supervisorAgentService;
+        this.conversationContextFactory = conversationContextFactory;
         this.agentExecutors = new LinkedHashMap<>();
         for (SpecialistAgent agent : agentExecutors) {
             this.agentExecutors.put(agent.name(), agent);
@@ -205,6 +210,12 @@ public class WorkflowService {
     }
 
     public AgentResponse executeAsAgentResponse(String sessionId, String objective, IntentResolution intentResolution) {
+        // 开始新工作流时清除旧状态
+        sessionMemoryService.clearWorkflowState(sessionId);
+
+        // 释放可能残留的旧 checkpoint（防止 stale data 泄漏到新 workflow）
+        checkpointService.release(sessionId);
+
         // 1. 保存用户消息到 session
         Session session = sessionMemoryService.getOrCreate(sessionId);
         sessionMemoryService.saveSession(session.addUserMessage(objective));
@@ -272,6 +283,10 @@ public class WorkflowService {
 
     AgentCapabilitySnapshotService agentCapabilitySnapshotService() {
         return agentCapabilitySnapshotService;
+    }
+
+    ConversationContextFactory conversationContextFactory() {
+        return conversationContextFactory;
     }
 
     IntentResolutionService intentResolutionService() {
@@ -390,7 +405,25 @@ public class WorkflowService {
         // 注意：session 消息由 executeAsAgentResponse 统一保存，此处不保存
         checkpointService.release(sessionId);
 
+        // 保存 COMPLETED 状态到 Session，用于后续意图判断
+        WorkflowState completedState = WorkflowState.completed(
+                objective, planId, extractDeliverableSummary(executedSteps));
+        sessionMemoryService.saveWorkflowState(sessionId, completedState);
+
         return response;
+    }
+
+    /**
+     * 从已完成的步骤中提取交付物摘要（不调用 LLM，保持轻量）。
+     */
+    private String extractDeliverableSummary(List<WorkflowStep> steps) {
+        if (steps == null) return "";
+        return steps.stream()
+                .filter(s -> s.getStatus() == StepStatus.COMPLETED)
+                .filter(s -> s.getResult() != null && !s.getResult().isBlank())
+                .map(WorkflowStep::getResult)
+                .collect(Collectors.joining(" | "))
+                .transform(s -> s.length() > 200 ? s.substring(0, 200) + "..." : s);
     }
 
 
@@ -2218,6 +2251,13 @@ public class WorkflowService {
     ) {
         if (responseMode == ResponseMode.WORKFLOW_SUMMARY) {
             return null; // 摘要模式不生成 deliverable
+        }
+
+        // 【新增】检测 SKIPPED 步骤，走补全路径
+        boolean hasSkipped = steps.stream()
+                .anyMatch(s -> s != null && s.getStatus() == StepStatus.SKIPPED);
+        if (hasSkipped) {
+            return synthesizeWithSkippedSteps(objective, steps, artifacts);
         }
 
         // 收集所有成功步骤的结果（只包含 COMPLETED 状态，排除 SKIPPED）
