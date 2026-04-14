@@ -19,6 +19,7 @@ import com.openmanus.saa.model.IntentRouteMode;
 import com.openmanus.saa.model.OutputEvaluationStatus;
 import com.openmanus.saa.model.PlanEvaluationResult;
 import com.openmanus.saa.model.ResponseMode;
+import com.openmanus.saa.model.StepStatus;
 import com.openmanus.saa.model.SkillCapabilityDescriptor;
 import com.openmanus.saa.model.WorkflowStep;
 import com.openmanus.saa.service.agent.SpecialistAgent;
@@ -174,7 +175,8 @@ class WorkflowServiceRegressionTest {
                 mock(IntentResolutionService.class),
                 List.<WorkflowSummaryFormatter>of(),
                 mock(com.openmanus.saa.service.supervisor.SupervisorAgentService.class),
-                mock(WorkflowCheckpointService.class)
+                mock(WorkflowCheckpointService.class),
+                mock(com.openmanus.saa.service.context.ConversationContextFactory.class)
         );
     }
 
@@ -268,5 +270,105 @@ class WorkflowServiceRegressionTest {
         );
 
         assertThat(result.needsRevision()).isFalse();
+    }
+
+    // ===== SKIPPED step handling tests =====
+
+    @Test
+    void generateDeliverableRoutesToSkippedStepSynthesisWhenHasSkippedSteps() {
+        SkillCapabilityService skillCapabilityService = mock(SkillCapabilityService.class);
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+
+        lenient().when(chatClient.prompt()).thenReturn(requestSpec);
+        lenient().when(requestSpec.system(any(String.class))).thenReturn(requestSpec);
+        lenient().when(requestSpec.user(any(String.class))).thenReturn(requestSpec);
+        lenient().when(requestSpec.call()).thenReturn(callSpec);
+        lenient().when(callSpec.content()).thenReturn("Generated content with completion note");
+
+        WorkflowService service = newWorkflowServiceWithChatClient(skillCapabilityService, chatClient);
+
+        WorkflowStep skippedStep = new WorkflowStep("manus", "search for Java resources")
+                .withStatus(StepStatus.SKIPPED);
+
+        WorkflowStep completedStep = new WorkflowStep("manus", "generate learning plan")
+                .withStatus(StepStatus.COMPLETED)
+                .withResult("Plan created successfully");
+
+        List<WorkflowStep> steps = List.of(skippedStep, completedStep);
+
+        String result = ReflectionTestUtils.invokeMethod(
+                service,
+                "generateDeliverable",
+                "帮我规划 Java 学习路线",
+                steps,
+                List.<String>of(),
+                ResponseMode.FINAL_DELIVERABLE
+        );
+
+        assertThat(result).isEqualTo("Generated content with completion note");
+        verify(chatClient).prompt();
+    }
+
+    @Test
+    void generateDeliverableUsesExistingLogicWhenNoSkippedSteps() {
+        SkillCapabilityService skillCapabilityService = mock(SkillCapabilityService.class);
+        ChatClient chatClient = mock(ChatClient.class);
+
+        WorkflowService service = newWorkflowServiceWithChatClient(skillCapabilityService, chatClient);
+
+        WorkflowStep completedStep = new WorkflowStep("manus", "generate learning plan")
+                .withStatus(StepStatus.COMPLETED)
+                .withResult("Complete learning plan content");
+
+        List<WorkflowStep> steps = List.of(completedStep);
+
+        String result = ReflectionTestUtils.invokeMethod(
+                service,
+                "generateDeliverable",
+                "帮我规划 Java 学习路线",
+                steps,
+                List.<String>of(),
+                ResponseMode.FINAL_DELIVERABLE
+        );
+
+        assertThat(result).isEqualTo("Complete learning plan content");
+        verify(chatClient, never()).prompt();
+    }
+
+    private WorkflowService newWorkflowServiceWithChatClient(
+            SkillCapabilityService skillCapabilityService,
+            ChatClient chatClient
+    ) {
+        OpenManusProperties properties = new OpenManusProperties();
+        properties.setWorkspace("./workspace");
+
+        SessionStorage sessionStorage = mock(SessionStorage.class);
+        lenient().when(sessionStorage.findById(any())).thenReturn(Optional.empty());
+        lenient().when(sessionStorage.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        return new WorkflowService(
+                chatClient,
+                mock(PlanningService.class),
+                mock(com.openmanus.saa.tool.PlanningTools.class),
+                properties,
+                List.<SpecialistAgent>of(),
+                new SessionMemoryService(
+                        sessionStorage,
+                        mock(SessionCompactor.class),
+                        new SessionConfig()
+                ),
+                mock(SessionManager.class),
+                mock(com.openmanus.saa.agent.AgentRegistryService.class),
+                mock(SkillsService.class),
+                skillCapabilityService,
+                mock(AgentCapabilitySnapshotService.class),
+                mock(IntentResolutionService.class),
+                List.<WorkflowSummaryFormatter>of(),
+                mock(com.openmanus.saa.service.supervisor.SupervisorAgentService.class),
+                mock(WorkflowCheckpointService.class),
+                mock(com.openmanus.saa.service.context.ConversationContextFactory.class)
+        );
     }
 }
