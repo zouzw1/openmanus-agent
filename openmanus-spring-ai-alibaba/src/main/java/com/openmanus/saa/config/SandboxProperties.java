@@ -5,8 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "openmanus.sandbox")
 public class SandboxProperties {
 
-    private boolean enabled = false;
-    private String image = "python:3.12-slim";
+    private boolean enabled = true;
+    private String image = "openmanus/agent-runtime:base";
     private String workingDirectory = "/workspace";
     private boolean mountWorkspace = true;
     private String hostWorkspacePath = "";
@@ -14,9 +14,9 @@ public class SandboxProperties {
     private boolean autoPullImage = true;
     private String shellExecutable = "sh";
     private String shellOption = "-lc";
-    private String memoryLimit = "512m";
-    private int timeoutSeconds = 30;
-    private boolean networkEnabled = false;
+    private String memoryLimit = "1g";
+    private int timeoutSeconds = 120;
+    private boolean networkEnabled = true;
 
     public boolean isEnabled() {
         return enabled;
