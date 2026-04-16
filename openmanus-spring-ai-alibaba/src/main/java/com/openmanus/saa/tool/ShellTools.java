@@ -1,6 +1,7 @@
 package com.openmanus.saa.tool;
 
 import com.openmanus.saa.config.OpenManusProperties;
+import com.openmanus.saa.config.SandboxProperties;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -31,16 +32,30 @@ public class ShellTools {
     );
 
     private final OpenManusProperties properties;
+    private final SandboxProperties sandboxProperties;
+    private final SandboxTools sandboxTools;
 
-    public ShellTools(OpenManusProperties properties) {
+    public ShellTools(
+            OpenManusProperties properties,
+            SandboxProperties sandboxProperties,
+            SandboxTools sandboxTools
+    ) {
         this.properties = properties;
+        this.sandboxProperties = sandboxProperties;
+        this.sandboxTools = sandboxTools;
     }
 
-    @Tool(description = "Execute a non-destructive PowerShell command inside the workspace")
+    @Tool(description = "Execute a non-destructive shell command, routed to sandbox or host based on configuration")
     public String runPowerShell(
-            @ToolParam(description = "Non-destructive PowerShell command to run inside the configured workspace.", required = true)
+            @ToolParam(description = "Non-destructive shell command to execute inside the configured workspace.", required = true)
             String command
     ) throws IOException, InterruptedException {
+        // 透明路由：sandbox 启用时优先走 sandbox
+        if (sandboxProperties.isEnabled()) {
+            return sandboxTools.runSandboxCommand(command);
+        }
+
+        // fallback: 原有宿主机执行逻辑
         String normalizedCommand = normalizeCommand(command);
         if (!properties.isShellEnabled()) {
             return "Shell tool is disabled. Enable openmanus.agent.shell-enabled to use it.";
