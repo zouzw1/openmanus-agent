@@ -618,7 +618,8 @@ public class PlanningService {
                 }
             }
         } catch (Exception e) {
-            log.warn("Failed to parse workflow plan as JSON, falling back to line parser", e);
+            log.warn("Failed to parse workflow plan as JSON, falling back to line parser. Cleaned content preview: {}",
+                normalizedContent.length() > 200 ? normalizedContent.substring(0, 200) + "..." : normalizedContent);
         }
 
         return Arrays.stream(content.split("\\R"))
