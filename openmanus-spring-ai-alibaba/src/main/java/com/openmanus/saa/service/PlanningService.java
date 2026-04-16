@@ -539,10 +539,65 @@ public class PlanningService {
                 log.info("Enriched step: {} -> tools={}, params={}", step.description(), requiredTools, parameters);
                 return new WorkflowStep(step.agent(), step.description(), List.copyOf(requiredTools), parameters);
             } catch (Exception e) {
-                log.warn("Failed to extract tool metadata for step: {}, using defaults", step.description(), e);
+                log.warn("First attempt failed for step: {}, trying fallback extraction", step.description());
+                // Fallback: try a second LLM call with more explicit guidance
+                try {
+                    Set<String> fallbackTools = extractToolsWithFallbackPrompt(step, objective);
+                    if (!fallbackTools.isEmpty()) {
+                        log.info("Fallback extraction succeeded for step '{}': {}", step.description(), fallbackTools);
+                        return new WorkflowStep(step.agent(), step.description(), List.copyOf(fallbackTools), Map.of());
+                    }
+                } catch (Exception fallbackEx) {
+                    log.debug("Fallback extraction also failed: {}", fallbackEx.getMessage());
+                }
+                log.warn("Failed to extract tool metadata for step: {}, using defaults", step.description());
                 return new WorkflowStep(step.agent(), step.description());
             }
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * Fallback tool extraction with more explicit prompting.
+     */
+    private Set<String> extractToolsWithFallbackPrompt(WorkflowStep step, String objective) {
+        String toolsSchema = buildPlanningToolGuidance();
+        String fallbackPrompt = """
+                Extract tool names from the step description.
+
+                Available tools:
+                %s
+
+                Step: %s
+
+                Return ONLY a JSON array of tool names like: ["toolName1", "toolName2"]
+                Use ONLY exact names from the list above.
+                If the step needs a search tool, look for tools with "search" in the name.
+                If the step needs a query tool, look for tools with "query" in the name.
+                """.formatted(toolsSchema, step.description());
+
+        String response = chatClient.prompt()
+                .user(fallbackPrompt)
+                .call()
+                .content();
+
+        Set<String> tools = new LinkedHashSet<>();
+        String cleaned = stripMarkdownCodeFence(response).trim();
+        if (cleaned.startsWith("[")) {
+            try {
+                JsonNode node = objectMapper.readTree(cleaned);
+                if (node.isArray()) {
+                    for (JsonNode item : node) {
+                        String name = item.asText();
+                        if (isPlanningKnownTool(name)) {
+                            tools.add(name);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Failed to parse fallback response: {}", e.getMessage());
+            }
+        }
+        return tools;
     }
 
     private List<WorkflowStep> parseWorkflowPlan(String content, Set<String> allowedAgents) {
@@ -720,7 +775,23 @@ public class PlanningService {
         if (content == null) {
             return "";
         }
-        return content.replace("```json", "").replace("```", "").trim();
+
+        // 1. 剥离 XML thinking 标签
+        //    匹配 <!--...-->, <??>...</??>, <thinking>...</thinking> 等模式
+        content = content.replaceAll("<!--[\\s\\S]*?-->", "");
+        content = content.replaceAll("(?s)<[\\w]+>[\\s\\S]*?</[\\w]+>", "");
+
+        // 2. 剥离 markdown code fence
+        content = content.replace("```json", "").replace("```", "").replace("`", "");
+
+        // 3. 提取纯 JSON 数组（首个 [ 到末个 ]）
+        int jsonStart = content.indexOf('[');
+        int jsonEnd = content.lastIndexOf(']');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            content = content.substring(jsonStart, jsonEnd + 1);
+        }
+
+        return content.trim();
     }
 
     private String stripPrefix(String line) {
