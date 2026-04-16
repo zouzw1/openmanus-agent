@@ -772,7 +772,7 @@ public class PlanningService {
         return canonical;
     }
 
-    private String stripMarkdownCodeFence(String content) {
+    String stripMarkdownCodeFence(String content) {
         if (content == null) {
             return "";
         }
