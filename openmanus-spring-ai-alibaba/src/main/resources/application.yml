@@ -3,10 +3,10 @@ spring:
     name: openmanus-spring-ai-alibaba
   ai:
     dashscope:
-      api-key: sk-e149a15431ec48ceb6a839cab679762e
-    zhipuai:
-      api-key: sk-2cjhRDoVwBSvHABkWkZOZnC9z9wnSn1aSnnMfgslTB0qS5H2
+      api-key: placeholder  # DashScope starter 在 classpath 上需要此配置，GLM 模式下不会实际使用
+    openai:
       base-url: https://code.coolyeah.net
+      api-key: sk-ZvJFoznLoN4ocI3E3VFFjKhuH0KPXKBUS5J0ny1HXo6d3imR
       chat:
         options:
           model: glm-5
@@ -16,7 +16,7 @@ server:
 
 openmanus:
   model:
-    provider: dashscope  # 可选: dashscope（通义千问）或 glm（智谱 AI）
+    provider: glm  # 可选: dashscope（通义千问）或 glm（智谱 AI）
   agents:
     enabled: true
     config-location: ./agents
@@ -60,17 +60,17 @@ openmanus:
     headless: true
     timeout-seconds: 30
   sandbox:
-    enabled: false
-    image: python:3.12-slim
+    enabled: true
+    image: openmanus/agent-runtime:base
     working-directory: /workspace
     mount-workspace: true
     workspace-mount-path: /workspace
     auto-pull-image: true
     shell-executable: sh
     shell-option: -lc
-    memory-limit: 512m
-    timeout-seconds: 30
-    network-enabled: false
+    memory-limit: 1g
+    timeout-seconds: 120
+    network-enabled: true
   mcp:
     enabled: true
     servers:
